@@ -1,0 +1,269 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Dropbox Vector Search Engine{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="row">
+        <div class="col-12">
+            <h1 class="mb-4">
+                <i class="fas fa-tachometer-alt"></i> Dashboard
+            </h1>
+        </div>
+    </div>
+
+    <!-- Processing Status -->
+    <div class="row">
+        <div class="col-12">
+            <div class="processing-status status-{{ status.status }}" id="processing-status">
+                <div class="row align-items-center">
+                    <div class="col-md-8">
+                        <h5 class="mb-2">
+                            <i class="fas fa-cog"></i> Processing Status: 
+                            <span class="text-capitalize">{{ status.status }}</span>
+                        </h5>
+                        
+                        {% if status.status == "running" %}
+                            <div class="progress mb-2">
+                                <div class="progress-bar progress-bar-striped progress-bar-animated" 
+                                     role="progressbar" 
+                                     style="width: {{ (status.files_processed / status.files_total * 100) if status.files_total > 0 else 0 }}%">
+                                    {{ status.files_processed }}/{{ status.files_total }}
+                                </div>
+                            </div>
+                            <small class="text-muted">
+                                Current file: {{ status.current_file or "N/A" }}
+                            </small>
+                        {% elif status.status == "completed" %}
+                            <p class="mb-1">
+                                <i class="fas fa-check-circle text-success"></i>
+                                Last processing completed successfully
+                            </p>
+                            <small class="text-muted">
+                                Processed {{ status.files_processed }} files
+                                {% if status.end_time %}
+                                    on {{ status.end_time.strftime('%Y-%m-%d %H:%M') }}
+                                {% endif %}
+                            </small>
+                        {% elif status.status == "failed" %}
+                            <p class="mb-1">
+                                <i class="fas fa-exclamation-triangle text-danger"></i>
+                                Last processing failed
+                            </p>
+                            {% if status.errors %}
+                                <small class="text-danger">
+                                    {{ status.errors[-1] }}
+                                </small>
+                            {% endif %}
+                        {% endif %}
+                    </div>
+                    
+                    <div class="col-md-4 text-end">
+                        <button class="btn btn-primary btn-action" onclick="processAllFiles()">
+                            <i class="fas fa-sync"></i> Process All Files
+                        </button>
+                        <button class="btn btn-secondary btn-action" onclick="processNewFiles()">
+                            <i class="fas fa-clock"></i> Process New Files
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Statistics -->
+    <div class="row">
+        <!-- Total Files -->
+        <div class="col-lg-3 col-md-6">
+            <div class="stats-card text-center">
+                <div class="stat-icon mb-3">
+                    <i class="fas fa-file-image fa-3x text-primary"></i>
+                </div>
+                <h3 class="mb-1">{{ stats.weaviate.total_files or 0 }}</h3>
+                <p class="text-muted mb-0">Total Files</p>
+            </div>
+        </div>
+
+        <!-- Images -->
+        <div class="col-lg-3 col-md-6">
+            <div class="stats-card text-center">
+                <div class="stat-icon mb-3">
+                    <i class="fas fa-image fa-3x text-success"></i>
+                </div>
+                <h3 class="mb-1">{{ stats.weaviate.by_type.image or 0 }}</h3>
+                <p class="text-muted mb-0">Images</p>
+            </div>
+        </div>
+
+        <!-- Videos -->
+        <div class="col-lg-3 col-md-6">
+            <div class="stats-card text-center">
+                <div class="stat-icon mb-3">
+                    <i class="fas fa-video fa-3x text-warning"></i>
+                </div>
+                <h3 class="mb-1">{{ stats.weaviate.by_type.video or 0 }}</h3>
+                <p class="text-muted mb-0">Videos</p>
+            </div>
+        </div>
+
+        <!-- Search -->
+        <div class="col-lg-3 col-md-6">
+            <div class="stats-card text-center">
+                <div class="stat-icon mb-3">
+                    <i class="fas fa-search fa-3x text-info"></i>
+                </div>
+                <a href="/search" class="btn btn-info btn-lg">
+                    <i class="fas fa-search"></i> Search Files
+                </a>
+                <p class="text-muted mb-0 mt-2">AI-Powered Search</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Configuration Info -->
+    <div class="row">
+        <div class="col-md-6">
+            <div class="stats-card">
+                <h5 class="mb-3">
+                    <i class="fas fa-cog"></i> Configuration
+                </h5>
+                <table class="table table-sm">
+                    <tr>
+                        <td><strong>Batch Size:</strong></td>
+                        <td>{{ stats.config.batch_size }}</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Max File Size:</strong></td>
+                        <td>{{ "%.1f"|format(stats.config.max_file_size / 1024 / 1024) }} MB</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Supported Images:</strong></td>
+                        <td>{{ ", ".join(stats.config.supported_image_types) }}</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Supported Videos:</strong></td>
+                        <td>{{ ", ".join(stats.config.supported_video_types) }}</td>
+                    </tr>
+                </table>
+            </div>
+        </div>
+
+        <!-- System Status -->
+        <div class="col-md-6">
+            <div class="stats-card">
+                <h5 class="mb-3">
+                    <i class="fas fa-server"></i> System Status
+                </h5>
+                <div class="mb-2">
+                    <span class="badge bg-success">
+                        <i class="fas fa-check"></i> Dropbox Connected
+                    </span>
+                </div>
+                <div class="mb-2">
+                    <span class="badge bg-success">
+                        <i class="fas fa-check"></i> Weaviate Connected
+                    </span>
+                </div>
+                <div class="mb-2">
+                    <span class="badge bg-success">
+                        <i class="fas fa-check"></i> CLIP Service
+                    </span>
+                </div>
+                <div class="mb-2">
+                    <span class="badge bg-success">
+                        <i class="fas fa-check"></i> Replicate API
+                    </span>
+                </div>
+                <div class="mt-3">
+                    <small class="text-muted">
+                        <i class="fas fa-clock"></i>
+                        Daily processing scheduled at 10:00 PM
+                    </small>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Quick Search -->
+    <div class="row">
+        <div class="col-12">
+            <div class="stats-card">
+                <h5 class="mb-3">
+                    <i class="fas fa-search"></i> Quick Search
+                </h5>
+                <form onsubmit="quickSearch(event)">
+                    <div class="input-group">
+                        <input type="text" 
+                               class="form-control" 
+                               id="quickSearchInput"
+                               placeholder="Search your images and videos..."
+                               required>
+                        <button class="btn btn-primary" type="submit">
+                            <i class="fas fa-search"></i> Search
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+function processAllFiles() {
+    if (confirm('This will process all files in your Dropbox. This may take a while. Continue?')) {
+        fetch('/api/process/all', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            alert('Processing started! Check the status above.');
+            location.reload();
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Error starting processing. Please try again.');
+        });
+    }
+}
+
+function processNewFiles() {
+    if (confirm('This will process files modified in the last 24 hours. Continue?')) {
+        fetch('/api/process/new', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            alert('Processing started! Check the status above.');
+            location.reload();
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Error starting processing. Please try again.');
+        });
+    }
+}
+
+function quickSearch(event) {
+    event.preventDefault();
+    const query = document.getElementById('quickSearchInput').value;
+    if (query) {
+        window.location.href = `/search?q=${encodeURIComponent(query)}`;
+    }
+}
+
+// Auto-refresh status if processing is running
+{% if status.status == "running" %}
+setTimeout(() => {
+    location.reload();
+}, 10000); // Refresh every 10 seconds
+{% endif %}
+</script>
+{% endblock %} 

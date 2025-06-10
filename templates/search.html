@@ -1,0 +1,265 @@
+{% extends "base.html" %}
+
+{% block title %}Search - Dropbox Vector Search Engine{% endblock %}
+
+{% block content %}
+<!-- Search Header -->
+<div class="search-box">
+    <div class="container">
+        <div class="row justify-content-center">
+            <div class="col-lg-8">
+                <h1 class="text-center mb-4">
+                    <i class="fas fa-search"></i> Search Your Files
+                </h1>
+                <form id="searchForm" onsubmit="performSearch(event)">
+                    <div class="input-group input-group-lg">
+                        <input type="text" 
+                               class="form-control" 
+                               id="searchInput"
+                               placeholder="Describe what you're looking for..."
+                               value="{{ request.args.get('q', '') }}"
+                               required>
+                        <button class="btn btn-light" type="submit">
+                            <i class="fas fa-search"></i> Search
+                        </button>
+                    </div>
+                    
+                    <!-- Advanced filters -->
+                    <div class="row mt-3">
+                        <div class="col-md-6">
+                            <select class="form-select" id="fileTypeFilter">
+                                <option value="">All file types</option>
+                                <option value="image">Images only</option>
+                                <option value="video">Videos only</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <select class="form-select" id="limitFilter">
+                                <option value="10">10 results</option>
+                                <option value="20">20 results</option>
+                                <option value="50">50 results</option>
+                            </select>
+                        </div>
+                    </div>
+                </form>
+                
+                <div class="text-center mt-3">
+                    <small class="text-light">
+                        Try: "people smiling", "sunset beach", "birthday party", "dogs playing"
+                    </small>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Search Results -->
+<div class="container">
+    <div class="search-results" id="searchResults">
+        <!-- Results will be loaded here -->
+    </div>
+    
+    <!-- Loading indicator -->
+    <div class="text-center py-5" id="loadingIndicator" style="display: none;">
+        <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">Searching...</span>
+        </div>
+        <p class="mt-2">Searching your files...</p>
+    </div>
+    
+    <!-- No results message -->
+    <div class="text-center py-5" id="noResults" style="display: none;">
+        <i class="fas fa-search fa-3x text-muted mb-3"></i>
+        <h4>No results found</h4>
+        <p class="text-muted">Try adjusting your search terms or filters.</p>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+let currentQuery = '';
+
+function performSearch(event) {
+    event.preventDefault();
+    
+    const query = document.getElementById('searchInput').value.trim();
+    const fileType = document.getElementById('fileTypeFilter').value;
+    const limit = document.getElementById('limitFilter').value;
+    
+    if (!query) {
+        alert('Please enter a search query');
+        return;
+    }
+    
+    currentQuery = query;
+    
+    // Show loading indicator
+    document.getElementById('loadingIndicator').style.display = 'block';
+    document.getElementById('searchResults').innerHTML = '';
+    document.getElementById('noResults').style.display = 'none';
+    
+    // Build search request
+    const searchData = {
+        query: query,
+        limit: parseInt(limit),
+        file_types: fileType ? [fileType] : null
+    };
+    
+    // Perform search
+    fetch('/api/search', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(searchData)
+    })
+    .then(response => response.json())
+    .then(data => {
+        document.getElementById('loadingIndicator').style.display = 'none';
+        displayResults(data);
+    })
+    .catch(error => {
+        console.error('Search error:', error);
+        document.getElementById('loadingIndicator').style.display = 'none';
+        alert('Search failed. Please try again.');
+    });
+    
+    // Update URL
+    const url = new URL(window.location);
+    url.searchParams.set('q', query);
+    if (fileType) url.searchParams.set('type', fileType);
+    if (limit !== '10') url.searchParams.set('limit', limit);
+    window.history.pushState({}, '', url);
+}
+
+function displayResults(data) {
+    const resultsContainer = document.getElementById('searchResults');
+    
+    if (!data.results || data.results.length === 0) {
+        document.getElementById('noResults').style.display = 'block';
+        return;
+    }
+    
+    // Results header
+    const header = document.createElement('div');
+    header.className = 'row mb-4';
+    header.innerHTML = `
+        <div class="col-12">
+            <h3>Search Results</h3>
+            <p class="text-muted">
+                Found ${data.total_count} results for "${data.query}" 
+                (${data.processing_time.toFixed(2)}s)
+            </p>
+        </div>
+    `;
+    resultsContainer.appendChild(header);
+    
+    // Results list
+    data.results.forEach(result => {
+        const resultCard = createResultCard(result);
+        resultsContainer.appendChild(resultCard);
+    });
+}
+
+function createResultCard(result) {
+    const card = document.createElement('div');
+    card.className = 'file-card';
+    
+    const isImage = result.file_type === 'image';
+    const thumbnailUrl = result.thumbnail_url || result.public_url;
+    
+    card.innerHTML = `
+        <div class="row">
+            ${isImage ? `
+                <div class="col-md-2">
+                    <img src="${thumbnailUrl}" 
+                         alt="${result.file_name}"
+                         class="thumbnail"
+                         onclick="openFile('${result.public_url}')"
+                         style="cursor: pointer;">
+                </div>
+                <div class="col-md-10">
+            ` : `
+                <div class="col-md-12">
+            `}
+                <div class="d-flex justify-content-between align-items-start mb-2">
+                    <h5 class="mb-1">
+                        <i class="fas fa-${isImage ? 'image' : 'video'} text-${isImage ? 'success' : 'warning'}"></i>
+                        ${result.file_name}
+                    </h5>
+                    <span class="similarity-score">
+                        ${(result.similarity_score * 100).toFixed(1)}% match
+                    </span>
+                </div>
+                
+                ${result.caption ? `
+                    <p class="mb-2">${result.caption}</p>
+                ` : ''}
+                
+                ${result.tags && result.tags.length > 0 ? `
+                    <div class="file-tags mb-2">
+                        ${result.tags.map(tag => `<span class="tag">${tag}</span>`).join('')}
+                    </div>
+                ` : ''}
+                
+                <div class="file-info">
+                    <i class="fas fa-folder"></i> ${result.dropbox_path} |
+                    <i class="fas fa-calendar"></i> ${new Date(result.modified_date).toLocaleDateString()}
+                </div>
+                
+                <div class="mt-2">
+                    <button class="btn btn-sm btn-primary" onclick="openFile('${result.public_url}')">
+                        <i class="fas fa-external-link-alt"></i> Open File
+                    </button>
+                    <button class="btn btn-sm btn-secondary" onclick="copyLink('${result.public_url}')">
+                        <i class="fas fa-copy"></i> Copy Link
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    return card;
+}
+
+function openFile(url) {
+    window.open(url, '_blank');
+}
+
+function copyLink(url) {
+    navigator.clipboard.writeText(url).then(() => {
+        // Show temporary success message
+        const toast = document.createElement('div');
+        toast.className = 'alert alert-success position-fixed';
+        toast.style.cssText = 'top: 20px; right: 20px; z-index: 9999; opacity: 0.9;';
+        toast.innerHTML = '<i class="fas fa-check"></i> Link copied to clipboard!';
+        document.body.appendChild(toast);
+        
+        setTimeout(() => {
+            document.body.removeChild(toast);
+        }, 2000);
+    }).catch(err => {
+        console.error('Failed to copy link:', err);
+        alert('Failed to copy link. Please copy manually: ' + url);
+    });
+}
+
+// Auto-search if query parameter is present
+document.addEventListener('DOMContentLoaded', function() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const query = urlParams.get('q');
+    const fileType = urlParams.get('type');
+    const limit = urlParams.get('limit');
+    
+    if (query) {
+        document.getElementById('searchInput').value = query;
+        if (fileType) document.getElementById('fileTypeFilter').value = fileType;
+        if (limit) document.getElementById('limitFilter').value = limit;
+        
+        // Trigger search
+        performSearch(new Event('submit'));
+    }
+});
+</script>
+{% endblock %} 
