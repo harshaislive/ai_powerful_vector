@@ -144,10 +144,10 @@ class ProcessingService:
                 else:
                     logger.info(f"File {dropbox_file.name} has changed, reprocessing...")
             
-            # Create public URL for the file
-            public_url = self.dropbox_service.create_shared_link(dropbox_file.path_display)
+            # Get local file URL instead of shared link
+            public_url = self.dropbox_service.get_local_file_url(dropbox_file.path_display)
             if not public_url:
-                logger.error(f"Could not create public URL for {dropbox_file.name}")
+                logger.error(f"Could not download file for processing: {dropbox_file.name}")
                 return None
             
             # Get optimized URLs based on file type and configuration
@@ -156,7 +156,7 @@ class ProcessingService:
             
             if dropbox_file.file_type == "image" and config.USE_THUMBNAILS:
                 # Use configured thumbnail size for processing to reduce bandwidth
-                thumbnail_url = self.dropbox_service.get_thumbnail_link(
+                thumbnail_url = self.dropbox_service.get_local_thumbnail(
                     dropbox_file.path_display, 
                     config.THUMBNAIL_SIZE
                 )
@@ -164,13 +164,12 @@ class ProcessingService:
                 processing_url = thumbnail_url or public_url
                 logger.info(f"Using {config.THUMBNAIL_SIZE} thumbnail for processing: {dropbox_file.name}")
             elif dropbox_file.file_type == "video" and config.USE_VIDEO_PREVIEWS:
-                # Get video preview/thumbnail
-                thumbnail_url = self.dropbox_service.get_video_preview_link(dropbox_file.path_display)
-                # For videos, still use full URL for now, but we have the preview
+                # For videos, use full file for now (could add video thumbnail later)
+                thumbnail_url = None  # Could implement video thumbnail extraction
                 processing_url = public_url
-                logger.info(f"Processing video with preview: {dropbox_file.name}")
+                logger.info(f"Processing video: {dropbox_file.name}")
             else:
-                # Use full-size files if optimization is disabled
+                # Use full-size files
                 processing_url = public_url
                 if dropbox_file.file_type == "image":
                     thumbnail_url = public_url  # Use full image as thumbnail

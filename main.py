@@ -54,6 +54,15 @@ async def lifespan(app: FastAPI):
             replace_existing=True
         )
         
+        # Schedule temp file cleanup every 6 hours
+        scheduler.add_job(
+            cleanup_temp_files_job,
+            CronTrigger(hour="*/6"),  # Every 6 hours
+            id="temp_cleanup",
+            name="Temp Files Cleanup",
+            replace_existing=True
+        )
+        
         scheduler.start()
         logger.info(f"Scheduled daily processing at {config.CRON_HOUR:02d}:{config.CRON_MINUTE:02d}")
         
@@ -95,6 +104,11 @@ templates = Jinja2Templates(directory="templates")
 if os.path.exists("static"):
     app.mount("/static", StaticFiles(directory="static"), name="static")
 
+# Mount temp files directory for serving downloaded Dropbox files
+temp_files_dir = os.path.join(os.getcwd(), "temp_files")
+os.makedirs(temp_files_dir, exist_ok=True)
+app.mount("/files", StaticFiles(directory=temp_files_dir), name="temp_files")
+
 async def daily_processing_job():
     """Daily job to process new files"""
     try:
@@ -108,6 +122,19 @@ async def daily_processing_job():
         
     except Exception as e:
         logger.error(f"Error in daily processing job: {e}")
+
+async def cleanup_temp_files_job():
+    """Job to clean up old temporary files"""
+    try:
+        logger.info("Starting temp files cleanup job...")
+        
+        if processing_service and processing_service.dropbox_service:
+            processing_service.dropbox_service.cleanup_temp_files(max_age_hours=24)
+            
+        logger.info("Temp files cleanup completed")
+        
+    except Exception as e:
+        logger.error(f"Error in temp files cleanup job: {e}")
 
 # API Endpoints
 

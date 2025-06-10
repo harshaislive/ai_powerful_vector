@@ -102,4 +102,5 @@ static/
 # Local data directories
 data/
 uploads/
-temp/ 
+temp/
+temp_files/ 

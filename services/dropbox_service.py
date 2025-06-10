@@ -5,6 +5,8 @@ from datetime import datetime
 import os
 from urllib.parse import urlparse
 import logging
+import tempfile
+import hashlib
 
 from config import config
 from models import DropboxFile
@@ -224,4 +226,126 @@ class DropboxService:
     def get_files_modified_after(self, after_date: datetime) -> List[DropboxFile]:
         """Get files modified after a specific date"""
         all_files = self.list_files()
-        return [f for f in all_files if f.modified > after_date] 
+        return [f for f in all_files if f.modified > after_date]
+
+    def download_file_to_temp(self, path: str) -> Optional[str]:
+        """Download a file to temporary directory and return local path"""
+        try:
+            # Create a safe filename based on the path hash
+            path_hash = hashlib.md5(path.encode()).hexdigest()
+            file_extension = os.path.splitext(path)[1]
+            temp_filename = f"{path_hash}{file_extension}"
+            
+            # Create temp directory if it doesn't exist
+            temp_dir = os.path.join(os.getcwd(), "temp_files")
+            os.makedirs(temp_dir, exist_ok=True)
+            
+            local_path = os.path.join(temp_dir, temp_filename)
+            
+            # Check if file already exists and is recent
+            if os.path.exists(local_path):
+                # File exists, check if it's still fresh (less than 1 hour old)
+                file_age = datetime.now().timestamp() - os.path.getmtime(local_path)
+                if file_age < 3600:  # 1 hour
+                    logger.info(f"Using cached file: {local_path}")
+                    return local_path
+            
+            # Download the file
+            self.dbx.files_download_to_file(local_path, path)
+            logger.info(f"Downloaded {path} to {local_path}")
+            return local_path
+            
+        except Exception as e:
+            logger.error(f"Error downloading file {path} to temp: {e}")
+            return None
+
+    def get_local_file_url(self, path: str, base_url: str = "http://localhost:8000") -> Optional[str]:
+        """Download file and return a local server URL"""
+        try:
+            local_path = self.download_file_to_temp(path)
+            if not local_path:
+                return None
+                
+            # Convert absolute path to relative path for URL
+            temp_dir = os.path.join(os.getcwd(), "temp_files")
+            relative_path = os.path.relpath(local_path, os.getcwd())
+            
+            # Return URL that our FastAPI server can serve
+            file_url = f"{base_url}/files/{os.path.basename(local_path)}"
+            return file_url
+            
+        except Exception as e:
+            logger.error(f"Error creating local file URL for {path}: {e}")
+            return None
+
+    def get_local_thumbnail(self, path: str, size: str = "medium", base_url: str = "http://localhost:8000") -> Optional[str]:
+        """Get local thumbnail for an image file"""
+        try:
+            if not path.lower().endswith(tuple(config.SUPPORTED_IMAGE_TYPES)):
+                return None
+            
+            # Map size parameter to Dropbox thumbnail sizes
+            size_mapping = {
+                "small": dropbox.files.ThumbnailSize.w128h128,
+                "medium": dropbox.files.ThumbnailSize.w640h480,
+                "large": dropbox.files.ThumbnailSize.w1024h768
+            }
+            
+            thumbnail_size = size_mapping.get(size, dropbox.files.ThumbnailSize.w640h480)
+            
+            # Create thumbnail filename
+            path_hash = hashlib.md5(path.encode()).hexdigest()
+            thumb_filename = f"{path_hash}_thumb_{size}.jpg"
+            
+            temp_dir = os.path.join(os.getcwd(), "temp_files")
+            os.makedirs(temp_dir, exist_ok=True)
+            thumb_path = os.path.join(temp_dir, thumb_filename)
+            
+            # Check if thumbnail already exists
+            if os.path.exists(thumb_path):
+                file_age = datetime.now().timestamp() - os.path.getmtime(thumb_path)
+                if file_age < 3600:  # 1 hour cache
+                    return f"{base_url}/files/{thumb_filename}"
+            
+            # Get thumbnail from Dropbox
+            thumbnail_response = self.dbx.files_get_thumbnail(
+                path, 
+                format=dropbox.files.ThumbnailFormat.jpeg, 
+                size=thumbnail_size
+            )
+            
+            # Save thumbnail to local file
+            with open(thumb_path, 'wb') as f:
+                f.write(thumbnail_response.content)
+            
+            logger.info(f"Created thumbnail for {path} at {thumb_path}")
+            return f"{base_url}/files/{thumb_filename}"
+            
+        except Exception as e:
+            logger.error(f"Error creating local thumbnail for {path}: {e}")
+            # Fallback to full image
+            return self.get_local_file_url(path, base_url)
+
+    def cleanup_temp_files(self, max_age_hours: int = 24):
+        """Clean up old temporary files"""
+        try:
+            temp_dir = os.path.join(os.getcwd(), "temp_files")
+            if not os.path.exists(temp_dir):
+                return
+                
+            current_time = datetime.now().timestamp()
+            cleaned_count = 0
+            
+            for filename in os.listdir(temp_dir):
+                file_path = os.path.join(temp_dir, filename)
+                if os.path.isfile(file_path):
+                    file_age = current_time - os.path.getmtime(file_path)
+                    if file_age > (max_age_hours * 3600):
+                        os.remove(file_path)
+                        cleaned_count += 1
+            
+            if cleaned_count > 0:
+                logger.info(f"Cleaned up {cleaned_count} old temporary files")
+                
+        except Exception as e:
+            logger.error(f"Error cleaning up temp files: {e}") 
