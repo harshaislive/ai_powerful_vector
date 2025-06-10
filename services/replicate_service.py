@@ -3,6 +3,7 @@ import logging
 from typing import Optional
 import asyncio
 import time
+import os
 
 from config import config
 from models import CaptionRequest, CaptionResponse
@@ -14,8 +15,8 @@ class ReplicateService:
         if not config.REPLICATE_API_TOKEN:
             raise ValueError("REPLICATE_API_TOKEN is required")
         
-        # Set the API token
-        replicate.api.token = config.REPLICATE_API_TOKEN
+        # Set the API token using environment variable (modern replicate library)
+        os.environ["REPLICATE_API_TOKEN"] = config.REPLICATE_API_TOKEN
         
         # BLIP model for image captioning
         self.blip_model = "salesforce/blip:2e1dddc8621f72155f24cf2e0adbde548458d3cab9f00c0139eea840d0ac4746"

@@ -2,7 +2,7 @@ fastapi==0.104.1
 uvicorn==0.24.0
 python-dotenv==1.0.0
 dropbox==11.36.2
-replicate==0.22.0
+replicate==0.25.1
 weaviate-client==3.25.3
 requests==2.31.0
 python-multipart==0.0.6

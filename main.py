@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
+from contextlib import asynccontextmanager
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 import logging
@@ -29,7 +30,8 @@ logger = logging.getLogger(__name__)
 app = FastAPI(
     title="Dropbox Vector Search Engine",
     description="AI-powered search engine for Dropbox images and videos using CLIP embeddings and BLIP captions",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
 # Initialize templates
@@ -43,11 +45,12 @@ if os.path.exists("static"):
 processing_service = None
 scheduler = None
 
-@app.on_event("startup")
-async def startup_event():
-    """Initialize services and scheduler on startup"""
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Modern FastAPI lifespan event handler"""
     global processing_service, scheduler
     
+    # Startup
     try:
         logger.info("Starting up Dropbox Vector Search Engine...")
         
@@ -74,12 +77,10 @@ async def startup_event():
     except Exception as e:
         logger.error(f"Error during startup: {e}")
         raise
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Cleanup on shutdown"""
-    global processing_service, scheduler
     
+    yield
+    
+    # Shutdown
     try:
         logger.info("Shutting down...")
         
@@ -266,12 +267,4 @@ async def internal_error_handler(request: Request, exc):
     logger.error(f"Internal server error: {exc}")
     return templates.TemplateResponse("500.html", {"request": request, "error": str(exc)}, status_code=500)
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(
-        "main:app",
-        host=config.APP_HOST,
-        port=config.APP_PORT,
-        reload=True,
-        log_level="info"
-    ) 
+# Railway will start the app directly, no need for if __name__ == "__main__" 

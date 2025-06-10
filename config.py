@@ -30,7 +30,8 @@ class Config:
     
     # Application Configuration
     APP_HOST = os.getenv("APP_HOST", "0.0.0.0")
-    APP_PORT = int(os.getenv("APP_PORT", 8000))
+    # Railway automatically assigns PORT environment variable
+    APP_PORT = int(os.getenv("PORT") or os.getenv("APP_PORT", 8000))
     
     # Processing Configuration
     BATCH_SIZE = int(os.getenv("BATCH_SIZE", 10))
