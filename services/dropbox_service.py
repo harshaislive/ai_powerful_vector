@@ -161,7 +161,7 @@ class DropboxService:
             thumbnail_size = size_mapping.get(size, dropbox.files.ThumbnailSize.w640h480)
             
             # Get thumbnail data
-            thumbnail_response = self.dbx.files_get_thumbnail(
+            metadata, thumbnail_content = self.dbx.files_get_thumbnail(
                 path, 
                 format=dropbox.files.ThumbnailFormat.jpeg, 
                 size=thumbnail_size
@@ -192,7 +192,7 @@ class DropboxService:
             
             # Try to get video thumbnail
             try:
-                thumbnail_response = self.dbx.files_get_thumbnail(
+                metadata, thumbnail_content = self.dbx.files_get_thumbnail(
                     path,
                     format=dropbox.files.ThumbnailFormat.jpeg,
                     size=dropbox.files.ThumbnailSize.w640h480
@@ -259,12 +259,16 @@ class DropboxService:
             logger.error(f"Error downloading file {path} to temp: {e}")
             return None
 
-    def get_local_file_url(self, path: str, base_url: str = "http://localhost:8000") -> Optional[str]:
+    def get_local_file_url(self, path: str, base_url: str = None) -> Optional[str]:
         """Download file and return a local server URL"""
         try:
             local_path = self.download_file_to_temp(path)
             if not local_path:
                 return None
+                
+            # Use config server URL if base_url not provided
+            if base_url is None:
+                base_url = config.SERVER_URL
                 
             # Convert absolute path to relative path for URL
             temp_dir = os.path.join(os.getcwd(), "temp_files")
@@ -278,11 +282,15 @@ class DropboxService:
             logger.error(f"Error creating local file URL for {path}: {e}")
             return None
 
-    def get_local_thumbnail(self, path: str, size: str = "medium", base_url: str = "http://localhost:8000") -> Optional[str]:
+    def get_local_thumbnail(self, path: str, size: str = "medium", base_url: str = None) -> Optional[str]:
         """Get local thumbnail for an image file"""
         try:
             if not path.lower().endswith(tuple(config.SUPPORTED_IMAGE_TYPES)):
                 return None
+            
+            # Use config server URL if base_url not provided
+            if base_url is None:
+                base_url = config.SERVER_URL
             
             # Map size parameter to Dropbox thumbnail sizes
             size_mapping = {
@@ -308,7 +316,7 @@ class DropboxService:
                     return f"{base_url}/files/{thumb_filename}"
             
             # Get thumbnail from Dropbox
-            thumbnail_response = self.dbx.files_get_thumbnail(
+            metadata, thumbnail_content = self.dbx.files_get_thumbnail(
                 path, 
                 format=dropbox.files.ThumbnailFormat.jpeg, 
                 size=thumbnail_size
@@ -316,7 +324,7 @@ class DropboxService:
             
             # Save thumbnail to local file
             with open(thumb_path, 'wb') as f:
-                f.write(thumbnail_response.content)
+                f.write(thumbnail_content)
             
             logger.info(f"Created thumbnail for {path} at {thumb_path}")
             return f"{base_url}/files/{thumb_filename}"

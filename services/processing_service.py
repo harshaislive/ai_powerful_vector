@@ -27,6 +27,9 @@ class ProcessingService:
             files_total=0
         )
         self.processing_lock = asyncio.Lock()
+        self.is_paused = False
+        self.pause_event = asyncio.Event()
+        self.pause_event.set()  # Initially not paused
         
         logger.info("Processing service initialized")
     
@@ -53,6 +56,14 @@ class ProcessingService:
                 # Process files in batches
                 batch_size = config.BATCH_SIZE
                 for i in range(0, len(dropbox_files), batch_size):
+                    # Check for pause before each batch
+                    await self.pause_event.wait()
+                    
+                    # Check if processing was stopped
+                    if self.current_status.status == "stopped":
+                        logger.info("Processing stopped by user")
+                        break
+                        
                     batch = dropbox_files[i:i + batch_size]
                     await self._process_batch(batch)
                 
@@ -93,6 +104,14 @@ class ProcessingService:
                 # Process files in batches
                 batch_size = config.BATCH_SIZE
                 for i in range(0, len(dropbox_files), batch_size):
+                    # Check for pause before each batch
+                    await self.pause_event.wait()
+                    
+                    # Check if processing was stopped
+                    if self.current_status.status == "stopped":
+                        logger.info("Processing stopped by user")
+                        break
+                        
                     batch = dropbox_files[i:i + batch_size]
                     await self._process_batch(batch)
                 
@@ -287,7 +306,41 @@ class ProcessingService:
     
     def get_processing_status(self) -> ProcessingStatus:
         """Get current processing status"""
+        # Add pause state to status
+        if self.is_paused and self.current_status.status == "running":
+            self.current_status.status = "paused"
         return self.current_status
+    
+    async def pause_processing(self) -> bool:
+        """Pause the current processing"""
+        if self.current_status.status in ["running", "paused"]:
+            self.is_paused = True
+            self.pause_event.clear()
+            self.current_status.status = "paused"
+            logger.info("Processing paused")
+            return True
+        return False
+    
+    async def resume_processing(self) -> bool:
+        """Resume the paused processing"""
+        if self.is_paused and self.current_status.status == "paused":
+            self.is_paused = False
+            self.pause_event.set()
+            self.current_status.status = "running"
+            logger.info("Processing resumed")
+            return True
+        return False
+    
+    async def stop_processing(self) -> bool:
+        """Stop the current processing"""
+        if self.current_status.status in ["running", "paused"]:
+            self.is_paused = False
+            self.pause_event.set()
+            self.current_status.status = "stopped"
+            self.current_status.end_time = datetime.now()
+            logger.info("Processing stopped")
+            return True
+        return False
     
     def get_stats(self) -> Dict[str, Any]:
         """Get processing statistics (optimized - doesn't scan entire Dropbox)"""

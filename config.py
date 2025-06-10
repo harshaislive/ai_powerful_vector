@@ -33,6 +33,12 @@ class Config:
     # Railway automatically assigns PORT environment variable
     APP_PORT = int(os.getenv("PORT") or os.getenv("APP_PORT", 8000))
     
+    # Server URL for external access (Railway sets RAILWAY_PUBLIC_DOMAIN)
+    SERVER_URL = os.getenv("SERVER_URL") or (
+        f"https://{os.getenv('RAILWAY_PUBLIC_DOMAIN')}" if os.getenv("RAILWAY_PUBLIC_DOMAIN") 
+        else f"http://localhost:{APP_PORT}"
+    )
+    
     # Processing Configuration
     BATCH_SIZE = int(os.getenv("BATCH_SIZE", 10))
     

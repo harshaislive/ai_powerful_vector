@@ -99,6 +99,9 @@ WEAVIATE_URL=https://weaviate-wdke-production.up.railway.app/
 APP_HOST=0.0.0.0
 APP_PORT=8000
 
+# Server URL for external access (for Railway, leave blank - auto-detected)
+SERVER_URL=
+
 # Processing Configuration
 BATCH_SIZE=10
 

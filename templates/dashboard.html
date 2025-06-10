@@ -45,6 +45,28 @@
                                     on {{ status.end_time.strftime('%Y-%m-%d %H:%M') }}
                                 {% endif %}
                             </small>
+                        {% elif status.status == "paused" %}
+                            <p class="mb-1">
+                                <i class="fas fa-pause-circle text-warning"></i>
+                                Processing paused
+                            </p>
+                            <div class="progress mb-2">
+                                <div class="progress-bar bg-warning" role="progressbar" 
+                                     style="width: {{ (status.files_processed / status.files_total * 100) if status.files_total > 0 else 0 }}%">
+                                    {{ status.files_processed }}/{{ status.files_total }}
+                                </div>
+                            </div>
+                            <small class="text-muted">
+                                Current file: {{ status.current_file or "N/A" }}
+                            </small>
+                        {% elif status.status == "stopped" %}
+                            <p class="mb-1">
+                                <i class="fas fa-stop-circle text-secondary"></i>
+                                Processing stopped
+                            </p>
+                            <small class="text-muted">
+                                Processed {{ status.files_processed }} of {{ status.files_total }} files
+                            </small>
                         {% elif status.status == "failed" %}
                             <p class="mb-1">
                                 <i class="fas fa-exclamation-triangle text-danger"></i>
@@ -59,12 +81,28 @@
                     </div>
                     
                     <div class="col-md-4 text-end">
-                        <button class="btn btn-primary btn-action" onclick="processAllFiles()">
-                            <i class="fas fa-sync"></i> Process All Files
-                        </button>
-                        <button class="btn btn-secondary btn-action" onclick="processNewFiles()">
-                            <i class="fas fa-clock"></i> Process New Files
-                        </button>
+                        {% if status.status == "idle" or status.status == "completed" or status.status == "failed" or status.status == "stopped" %}
+                            <button class="btn btn-primary btn-action" onclick="processAllFiles()">
+                                <i class="fas fa-sync"></i> Process All Files
+                            </button>
+                            <button class="btn btn-secondary btn-action" onclick="processNewFiles()">
+                                <i class="fas fa-clock"></i> Process New Files
+                            </button>
+                        {% elif status.status == "running" %}
+                            <button class="btn btn-warning btn-action" onclick="pauseProcessing()">
+                                <i class="fas fa-pause"></i> Pause
+                            </button>
+                            <button class="btn btn-danger btn-action" onclick="stopProcessing()">
+                                <i class="fas fa-stop"></i> Stop
+                            </button>
+                        {% elif status.status == "paused" %}
+                            <button class="btn btn-success btn-action" onclick="resumeProcessing()">
+                                <i class="fas fa-play"></i> Resume
+                            </button>
+                            <button class="btn btn-danger btn-action" onclick="stopProcessing()">
+                                <i class="fas fa-stop"></i> Stop
+                            </button>
+                        {% endif %}
                     </div>
                 </div>
             </div>
@@ -248,6 +286,64 @@ function processNewFiles() {
     }
 }
 
+function pauseProcessing() {
+    if (confirm('Pause the current processing?')) {
+        fetch('/api/process/pause', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            alert('Processing paused.');
+            location.reload();
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Error pausing processing. Please try again.');
+        });
+    }
+}
+
+function resumeProcessing() {
+    fetch('/api/process/resume', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        alert('Processing resumed.');
+        location.reload();
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Error resuming processing. Please try again.');
+    });
+}
+
+function stopProcessing() {
+    if (confirm('Stop the current processing? This cannot be undone.')) {
+        fetch('/api/process/stop', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            alert('Processing stopped.');
+            location.reload();
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Error stopping processing. Please try again.');
+        });
+    }
+}
+
 function quickSearch(event) {
     event.preventDefault();
     const query = document.getElementById('quickSearchInput').value;
@@ -256,8 +352,8 @@ function quickSearch(event) {
     }
 }
 
-// Auto-refresh status if processing is running
-{% if status.status == "running" %}
+// Auto-refresh status if processing is running or paused
+{% if status.status == "running" or status.status == "paused" %}
 setTimeout(() => {
     location.reload();
 }, 10000); // Refresh every 10 seconds

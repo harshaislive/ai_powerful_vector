@@ -214,6 +214,42 @@ async def process_new_files(background_tasks: BackgroundTasks, hours_back: int =
     
     return {"message": f"Processing files from last {hours_back} hours", "status": "initiated"}
 
+@app.post("/api/process/pause")
+async def pause_processing():
+    """Pause the current processing"""
+    if not processing_service:
+        raise HTTPException(status_code=503, detail="Processing service not initialized")
+    
+    success = await processing_service.pause_processing()
+    if success:
+        return {"message": "Processing paused", "status": "paused"}
+    else:
+        raise HTTPException(status_code=400, detail="No active processing to pause")
+
+@app.post("/api/process/resume")
+async def resume_processing():
+    """Resume the paused processing"""
+    if not processing_service:
+        raise HTTPException(status_code=503, detail="Processing service not initialized")
+    
+    success = await processing_service.resume_processing()
+    if success:
+        return {"message": "Processing resumed", "status": "running"}
+    else:
+        raise HTTPException(status_code=400, detail="No paused processing to resume")
+
+@app.post("/api/process/stop")
+async def stop_processing():
+    """Stop the current processing"""
+    if not processing_service:
+        raise HTTPException(status_code=503, detail="Processing service not initialized")
+    
+    success = await processing_service.stop_processing()
+    if success:
+        return {"message": "Processing stopped", "status": "stopped"}
+    else:
+        raise HTTPException(status_code=400, detail="No active processing to stop")
+
 @app.post("/api/search")
 async def search_files(search_request: SearchRequest):
     """Search files using vector similarity and text search"""
