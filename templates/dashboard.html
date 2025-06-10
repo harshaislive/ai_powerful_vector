@@ -132,10 +132,7 @@
                         <td><strong>Batch Size:</strong></td>
                         <td>{{ stats.config.batch_size }}</td>
                     </tr>
-                    <tr>
-                        <td><strong>Max File Size:</strong></td>
-                        <td>{{ "%.1f"|format(stats.config.max_file_size / 1024 / 1024) }} MB</td>
-                    </tr>
+
                     <tr>
                         <td><strong>Supported Images:</strong></td>
                         <td>{{ ", ".join(stats.config.supported_image_types) }}</td>

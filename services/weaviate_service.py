@@ -118,7 +118,29 @@ class WeaviateService:
                         {
                             "name": "metadata",
                             "dataType": ["object"],
-                            "description": "Additional metadata"
+                            "description": "Additional metadata",
+                            "nestedProperties": [
+                                {
+                                    "name": "content_hash",
+                                    "dataType": ["text"],
+                                    "description": "Dropbox content hash for duplicate detection"
+                                },
+                                {
+                                    "name": "revision",
+                                    "dataType": ["text"],
+                                    "description": "Dropbox file revision"
+                                },
+                                {
+                                    "name": "server_modified",
+                                    "dataType": ["text"],
+                                    "description": "Server modification timestamp"
+                                },
+                                {
+                                    "name": "client_modified",
+                                    "dataType": ["text"],
+                                    "description": "Client modification timestamp"
+                                }
+                            ]
                         }
                     ]
                 }
@@ -366,9 +388,9 @@ class WeaviateService:
             return []
     
     def get_stats(self) -> Dict[str, Any]:
-        """Get statistics about stored files"""
+        """Get statistics about stored files (simplified for compatibility)"""
         try:
-            # Get total count
+            # Get total count using simple aggregation
             total_result = (
                 self.client.query
                 .aggregate("DropboxFile")
@@ -378,32 +400,53 @@ class WeaviateService:
             
             total_count = total_result.get("data", {}).get("Aggregate", {}).get("DropboxFile", [{}])[0].get("meta", {}).get("count", 0)
             
-            # Get counts by file type
-            type_result = (
+            # For file type counts, use simple queries since group_by is not available
+            image_result = (
                 self.client.query
                 .aggregate("DropboxFile")
-                .with_group_by(["file_type"])
+                .with_where({
+                    "path": ["file_type"],
+                    "operator": "Equal",
+                    "valueText": "image"
+                })
                 .with_meta_count()
                 .do()
             )
             
-            type_groups = type_result.get("data", {}).get("Aggregate", {}).get("DropboxFile", [])
-            type_counts = {}
-            for group in type_groups:
-                file_type = group.get("groupedBy", {}).get("value")
-                count = group.get("meta", {}).get("count", 0)
-                if file_type:
-                    type_counts[file_type] = count
+            video_result = (
+                self.client.query
+                .aggregate("DropboxFile")
+                .with_where({
+                    "path": ["file_type"],
+                    "operator": "Equal",
+                    "valueText": "video"
+                })
+                .with_meta_count()
+                .do()
+            )
+            
+            image_count = image_result.get("data", {}).get("Aggregate", {}).get("DropboxFile", [{}])[0].get("meta", {}).get("count", 0)
+            video_count = video_result.get("data", {}).get("Aggregate", {}).get("DropboxFile", [{}])[0].get("meta", {}).get("count", 0)
             
             return {
                 "total_files": total_count,
-                "by_type": type_counts,
+                "by_type": {
+                    "image": image_count,
+                    "video": video_count
+                },
                 "last_updated": datetime.now().isoformat()
             }
             
         except Exception as e:
             logger.error(f"Error getting stats: {e}")
-            return {"error": str(e)}
+            return {
+                "total_files": 0,
+                "by_type": {
+                    "image": 0,
+                    "video": 0
+                },
+                "error": str(e)
+            }
     
     def delete_file(self, file_id: str) -> bool:
         """Delete a file from Weaviate"""

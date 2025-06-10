@@ -35,7 +35,6 @@ class Config:
     
     # Processing Configuration
     BATCH_SIZE = int(os.getenv("BATCH_SIZE", 10))
-    MAX_FILE_SIZE = int(os.getenv("MAX_FILE_SIZE", 50 * 1024 * 1024))  # 50MB
     
     # Optimization Configuration
     USE_THUMBNAILS = os.getenv("USE_THUMBNAILS", "true").lower() == "true"

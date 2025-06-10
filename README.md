@@ -101,7 +101,6 @@ APP_PORT=8000
 
 # Processing Configuration
 BATCH_SIZE=10
-MAX_FILE_SIZE=52428800
 
 # Optimization Configuration (New Features)
 USE_THUMBNAILS=true                    # Process images using thumbnails instead of full size
@@ -249,7 +248,7 @@ The application provides comprehensive logging for:
 1. **Dropbox Authentication**: Ensure refresh token is valid
 2. **CLIP Service**: Verify CLIP service URL is accessible
 3. **Weaviate Connection**: Check Weaviate instance status
-4. **File Processing Errors**: Check file size limits and format support
+4. **File Processing Errors**: Check format support
 
 ### Debug Mode
 Set log level to DEBUG in `main.py` for detailed logging.

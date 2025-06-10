@@ -131,10 +131,7 @@ class ProcessingService:
             self.current_status.current_file = dropbox_file.name
             logger.info(f"Processing file: {dropbox_file.name}")
             
-            # Check if file is too large
-            if dropbox_file.size > config.MAX_FILE_SIZE:
-                logger.warning(f"Skipping {dropbox_file.name} - file too large ({dropbox_file.size} bytes)")
-                return None
+
             
             # Check if file already exists and hasn't changed
             existing_file = self.weaviate_service.get_file_by_path(dropbox_file.path_display)
@@ -294,39 +291,38 @@ class ProcessingService:
         return self.current_status
     
     def get_stats(self) -> Dict[str, Any]:
-        """Get processing statistics"""
+        """Get processing statistics (optimized - doesn't scan entire Dropbox)"""
         try:
             weaviate_stats = self.weaviate_service.get_stats()
-            dropbox_files = self.dropbox_service.list_files()
             
-            # Get processed files count from Weaviate
+            # Use Weaviate data instead of scanning Dropbox every time
             processed_count = weaviate_stats.get("total_files", 0)
-            total_dropbox_files = len(dropbox_files)
-            
-            # Calculate file type distribution
-            image_files = len([f for f in dropbox_files if f.file_type == "image"])
-            video_files = len([f for f in dropbox_files if f.file_type == "video"])
+            weaviate_by_type = weaviate_stats.get("by_type", {"image": 0, "video": 0})
             
             stats = {
                 "dropbox_files": {
-                    "total": total_dropbox_files,
-                    "images": image_files,
-                    "videos": video_files
+                    "total": "Scan needed",  # Only show actual count after manual scan
+                    "images": "Scan needed",
+                    "videos": "Scan needed"
                 },
                 "processed_files": {
                     "total": processed_count,
-                    "percentage": round((processed_count / total_dropbox_files * 100) if total_dropbox_files > 0 else 0, 2)
-                },
-                "unprocessed_files": {
-                    "total": max(0, total_dropbox_files - processed_count),
-                    "percentage": round(((total_dropbox_files - processed_count) / total_dropbox_files * 100) if total_dropbox_files > 0 else 0, 2)
+                    "images": weaviate_by_type.get("image", 0),
+                    "videos": weaviate_by_type.get("video", 0)
                 },
                 "weaviate": weaviate_stats,
+                "config": {
+                    "batch_size": config.BATCH_SIZE,
+                    "supported_image_types": list(config.SUPPORTED_IMAGE_TYPES),
+                    "supported_video_types": list(config.SUPPORTED_VIDEO_TYPES),
+                    "use_thumbnails": config.USE_THUMBNAILS,
+                    "thumbnail_size": config.THUMBNAIL_SIZE
+                },
                 "optimization": {
-                    "thumbnail_processing": True,
-                    "video_preview": True,
-                    "duplicate_detection": True,
-                    "content_hash_tracking": True
+                    "thumbnail_processing": config.USE_THUMBNAILS,
+                    "video_preview": config.USE_VIDEO_PREVIEWS,
+                    "duplicate_detection": config.SKIP_DUPLICATE_FILES,
+                    "content_hash_tracking": config.TRACK_CONTENT_HASH
                 },
                 "last_processing": {
                     "status": self.current_status.status,
@@ -345,15 +341,17 @@ class ProcessingService:
             logger.error(f"Error getting stats: {e}")
             return {
                 "error": str(e),
-                "dropbox_files": {"total": 0, "images": 0, "videos": 0},
-                "processed_files": {"total": 0, "percentage": 0},
-                "unprocessed_files": {"total": 0, "percentage": 0},
+                "dropbox_files": {"total": "Error", "images": "Error", "videos": "Error"},
+                "processed_files": {"total": 0, "images": 0, "videos": 0},
+                "weaviate": {"total_files": 0, "by_type": {"image": 0, "video": 0}},
+                "config": {"batch_size": config.BATCH_SIZE},
                 "optimization": {
-                    "thumbnail_processing": True,
-                    "video_preview": True,
-                    "duplicate_detection": True,
-                    "content_hash_tracking": True
-                }
+                    "thumbnail_processing": config.USE_THUMBNAILS,
+                    "video_preview": config.USE_VIDEO_PREVIEWS,
+                    "duplicate_detection": config.SKIP_DUPLICATE_FILES,
+                    "content_hash_tracking": config.TRACK_CONTENT_HASH
+                },
+                "last_processing": {"status": "error", "files_processed": 0, "files_total": 0}
             }
     
     async def cleanup(self):
