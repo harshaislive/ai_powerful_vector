@@ -26,21 +26,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Initialize FastAPI app
-app = FastAPI(
-    title="Dropbox Vector Search Engine",
-    description="AI-powered search engine for Dropbox images and videos using CLIP embeddings and BLIP captions",
-    version="1.0.0",
-    lifespan=lifespan
-)
-
-# Initialize templates
-templates = Jinja2Templates(directory="templates")
-
-# Mount static files (we'll create this later)
-if os.path.exists("static"):
-    app.mount("/static", StaticFiles(directory="static"), name="static")
-
 # Initialize services
 processing_service = None
 scheduler = None
@@ -94,6 +79,21 @@ async def lifespan(app: FastAPI):
         
     except Exception as e:
         logger.error(f"Error during shutdown: {e}")
+
+# Initialize FastAPI app
+app = FastAPI(
+    title="Dropbox Vector Search Engine",
+    description="AI-powered search engine for Dropbox images and videos using CLIP embeddings and BLIP captions",
+    version="1.0.0",
+    lifespan=lifespan
+)
+
+# Initialize templates
+templates = Jinja2Templates(directory="templates")
+
+# Mount static files (we'll create this later)
+if os.path.exists("static"):
+    app.mount("/static", StaticFiles(directory="static"), name="static")
 
 async def daily_processing_job():
     """Daily job to process new files"""
