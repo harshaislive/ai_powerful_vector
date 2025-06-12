@@ -501,18 +501,33 @@ class DropboxService:
                     return f"{base_url}/files/{thumb_filename}"
             
             # Get thumbnail from Dropbox
-            metadata, thumbnail_content = self.dbx.files_get_thumbnail(
-                path, 
-                format=dropbox.files.ThumbnailFormat.jpeg, 
-                size=thumbnail_size
-            )
-            
-            # Save thumbnail to local file
-            with open(thumb_path, 'wb') as f:
-                f.write(thumbnail_content)
-            
-            logger.info(f"Created thumbnail for {path} at {thumb_path}")
-            return f"{base_url}/files/{thumb_filename}"
+            try:
+                metadata, response = self.dbx.files_get_thumbnail(
+                    path, 
+                    format=dropbox.files.ThumbnailFormat.jpeg, 
+                    size=thumbnail_size
+                )
+                
+                # Handle the response properly - it should be bytes
+                if hasattr(response, 'content'):
+                    thumbnail_content = response.content
+                elif isinstance(response, bytes):
+                    thumbnail_content = response
+                else:
+                    # If response is not bytes, try to get content
+                    thumbnail_content = response
+                
+                # Save thumbnail to local file
+                with open(thumb_path, 'wb') as f:
+                    f.write(thumbnail_content)
+                
+                logger.info(f"Created thumbnail for {path} at {thumb_path}")
+                return f"{base_url}/files/{thumb_filename}"
+                
+            except Exception as thumb_error:
+                logger.warning(f"Could not create thumbnail for {path}: {thumb_error}")
+                # Fallback to full image
+                return self.get_local_file_url(path, base_url)
             
         except Exception as e:
             logger.error(f"Error creating local thumbnail for {path}: {e}")

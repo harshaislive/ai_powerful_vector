@@ -12,10 +12,23 @@ from config import config
 logger = logging.getLogger(__name__)
 
 class LocalCacheService:
-    def __init__(self, db_path: str = "dropbox_cache.db"):
-        self.db_path = db_path
+    def __init__(self, db_path: str = None):
+        # Use environment variable or default path
+        if db_path is None:
+            # Check for persistent data directory (for cloud deployments)
+            data_dir = os.environ.get('CACHE_DATA_DIR', '.')
+            self.db_path = os.path.join(data_dir, "dropbox_cache.db")
+        else:
+            self.db_path = db_path
+        
+        # Ensure directory exists
+        db_dir = os.path.dirname(self.db_path)
+        if db_dir and not os.path.exists(db_dir):
+            os.makedirs(db_dir, exist_ok=True)
+            logger.info(f"Created cache directory: {db_dir}")
+        
         self.init_database()
-        logger.info(f"Local cache service initialized with database: {db_path}")
+        logger.info(f"Local cache service initialized with database: {self.db_path}")
     
     def init_database(self):
         """Initialize SQLite database with required tables"""

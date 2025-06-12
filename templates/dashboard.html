@@ -168,6 +168,67 @@
         </div>
     </div>
 
+    <!-- Cache Management -->
+    <div class="row">
+        <div class="col-12">
+            <div class="stats-card">
+                <h5 class="mb-3">
+                    <i class="fas fa-database"></i> Cache Management
+                </h5>
+                <div class="row align-items-center">
+                    <div class="col-md-8">
+                        <div class="mb-2">
+                            <strong>Local Cache Status:</strong>
+                            {% if stats.local_cache and stats.local_cache.total_files > 0 %}
+                                <span class="badge bg-success">
+                                    <i class="fas fa-check"></i> Populated ({{ stats.local_cache.total_files }} files)
+                                </span>
+                            {% else %}
+                                <span class="badge bg-warning">
+                                    <i class="fas fa-exclamation-triangle"></i> Empty - Needs Initialization
+                                </span>
+                            {% endif %}
+                        </div>
+                        {% if stats.local_cache and stats.local_cache.total_files > 0 %}
+                            <small class="text-muted">
+                                Database size: {{ stats.local_cache.database_size_mb }}MB | 
+                                Last sync: {{ stats.local_cache.last_sync or "Never" }}
+                            </small>
+                        {% else %}
+                            <small class="text-muted">
+                                Initialize cache to enable fast file listings and efficient processing
+                            </small>
+                        {% endif %}
+                    </div>
+                    <div class="col-md-4 text-end">
+                        {% if not stats.local_cache or stats.local_cache.total_files == 0 %}
+                            <button class="btn btn-primary btn-action" onclick="initializeCache()">
+                                <i class="fas fa-download"></i> Initialize Cache
+                            </button>
+                        {% else %}
+                            <button class="btn btn-outline-primary btn-action" onclick="syncCache()">
+                                <i class="fas fa-sync"></i> Sync Cache
+                            </button>
+                            <div class="dropdown d-inline-block">
+                                <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown">
+                                    <i class="fas fa-cog"></i> Cache
+                                </button>
+                                <ul class="dropdown-menu">
+                                    <li><a class="dropdown-item" href="#" onclick="getCacheStats()">
+                                        <i class="fas fa-chart-bar text-info"></i> View Stats
+                                    </a></li>
+                                    <li><a class="dropdown-item" href="#" onclick="clearCache()">
+                                        <i class="fas fa-trash text-danger"></i> Clear Cache
+                                    </a></li>
+                                </ul>
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Configuration Info -->
     <div class="row">
         <div class="col-md-6">
@@ -382,6 +443,85 @@ function stopProcessing() {
         .catch(error => {
             console.error('Error:', error);
             alert('Error stopping processing. Please try again.');
+        });
+    }
+}
+
+function initializeCache() {
+    if (confirm('Initialize cache with all files from Dropbox?\n\nThis will fetch file metadata (not the actual files) and may take a few minutes depending on your Dropbox size.')) {
+        fetch('/api/cache/init', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            alert(`Cache initialization started!\n\n${data.note}\n\nCheck the status above for progress.`);
+            location.reload();
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Error initializing cache. Please try again.');
+        });
+    }
+}
+
+function syncCache() {
+    if (confirm('Sync cache with latest Dropbox changes?')) {
+        fetch('/api/cache/sync', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            alert(`Cache sync started!\n\n${data.note}`);
+            location.reload();
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Error syncing cache. Please try again.');
+        });
+    }
+}
+
+function getCacheStats() {
+    fetch('/api/cache/stats')
+        .then(response => response.json())
+        .then(data => {
+            const stats = data.cache_stats;
+            const message = `Cache Statistics:\n\n` +
+                `Total Files: ${stats.total_files}\n` +
+                `Database Size: ${stats.database_size_mb} MB\n` +
+                `Last Sync: ${stats.last_sync || 'Never'}\n` +
+                `Last Full Sync: ${stats.last_full_sync || 'Never'}\n\n` +
+                `Files by Type:\n${Object.entries(stats.by_type || {}).map(([type, count]) => `  ${type}: ${count}`).join('\n')}`;
+            alert(message);
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Error getting cache stats. Please try again.');
+        });
+}
+
+function clearCache() {
+    if (confirm('⚠️ WARNING: This will clear the entire local cache!\n\nYou will need to re-initialize the cache after this.\n\nAre you sure you want to continue?')) {
+        fetch('/api/cache/clear', {
+            method: 'DELETE',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            alert('Cache cleared successfully!\n\nYou will need to initialize the cache again.');
+            location.reload();
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Error clearing cache. Please try again.');
         });
     }
 }

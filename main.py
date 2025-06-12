@@ -256,7 +256,7 @@ async def smart_process_files(background_tasks: BackgroundTasks):
 
 @app.post("/api/process/all")
 async def process_all_files(background_tasks: BackgroundTasks):
-    """Start processing all files in Dropbox - WARNING: Expensive operation, use sparingly"""
+    """Start full processing of all files (uses local cache when available)"""
     if not processing_service:
         raise HTTPException(status_code=503, detail="Processing service not initialized")
     
@@ -265,14 +265,24 @@ async def process_all_files(background_tasks: BackgroundTasks):
     if current_status.status == "running":
         raise HTTPException(status_code=409, detail="Processing already in progress")
     
-    # Start processing in background
+    # Check cache status
+    cache_empty = processing_service.dropbox_service.cache.is_cache_empty() if processing_service else True
+    
+    # Start full processing in background
     background_tasks.add_task(process_all_background)
     
-    return {
+    response = {
         "message": "Full processing started", 
-        "status": "initiated",
-        "warning": "This will fetch ALL files from Dropbox. Consider using /api/process/smart instead."
+        "status": "initiated"
     }
+    
+    if cache_empty:
+        response["note"] = "Cache is empty - will fetch files from Dropbox first, then process all files. This may take a while."
+        response["recommendation"] = "For faster processing, use 'Sync Cache' first, then 'Smart Process'"
+    else:
+        response["note"] = "Processing all files from local cache. This may take a while depending on file count."
+    
+    return response
 
 @app.post("/api/process/new")
 async def process_new_files(background_tasks: BackgroundTasks, hours_back: int = 24):
@@ -382,7 +392,70 @@ async def search_page(request: Request):
     """Search page UI"""
     return templates.TemplateResponse("search.html", {"request": request})
 
+@app.post("/api/cache/init")
+async def initialize_cache(background_tasks: BackgroundTasks):
+    """Initialize cache with full Dropbox sync (for first-time setup)"""
+    if not processing_service:
+        raise HTTPException(status_code=503, detail="Processing service not initialized")
+    
+    # Check if cache is already populated
+    cache_stats = processing_service.dropbox_service.cache.get_cache_stats()
+    if cache_stats.get("total_files", 0) > 0:
+        return {
+            "message": "Cache already initialized",
+            "status": "already_populated",
+            "files_cached": cache_stats.get("total_files", 0),
+            "note": "Use 'Sync Cache' to update with latest changes"
+        }
+    
+    # Start cache initialization in background
+    background_tasks.add_task(init_cache_background)
+    
+    return {
+        "message": "Cache initialization started", 
+        "status": "initiated",
+        "note": "This will fetch all files from Dropbox and populate the local cache. Check status for progress."
+    }
+
+@app.get("/api/cache/progress")
+async def get_cache_progress():
+    """Get cache sync progress (for live updates)"""
+    if not processing_service:
+        raise HTTPException(status_code=503, detail="Processing service not initialized")
+    
+    try:
+        stats = processing_service.dropbox_service.cache.get_cache_stats()
+        
+        # Check if any processing is running
+        processing_status = processing_service.get_processing_status() if processing_service else None
+        
+        return {
+            "cache_stats": stats,
+            "processing_status": {
+                "status": processing_status.status if processing_status else "idle",
+                "files_processed": processing_status.files_processed if processing_status else 0,
+                "files_total": processing_status.files_total if processing_status else 0,
+                "current_file": processing_status.current_file if processing_status else None
+            } if processing_status else {"status": "idle"},
+            "recommendations": {
+                "cache_empty": stats.get("total_files", 0) == 0,
+                "next_action": "Initialize Cache" if stats.get("total_files", 0) == 0 else "Smart Process"
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error getting cache progress: {e}")
+        raise HTTPException(status_code=500, detail=f"Error getting progress: {e}")
+
 # Background task functions
+
+async def init_cache_background():
+    """Background task for initializing cache with full Dropbox sync"""
+    try:
+        logger.info("Starting cache initialization background task")
+        changed_files, cursor = processing_service.dropbox_service.get_incremental_changes()
+        logger.info(f"Cache initialization completed: {len(changed_files)} files cached")
+    except Exception as e:
+        logger.error(f"Error in cache initialization background task: {e}")
 
 async def sync_cache_background():
     """Background task for syncing local cache with Dropbox"""
