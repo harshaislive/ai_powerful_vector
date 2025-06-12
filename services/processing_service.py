@@ -33,8 +33,11 @@ class ProcessingService:
         
         logger.info("Processing service initialized")
     
-    async def process_all_files(self) -> ProcessingStatus:
-        """Process all files in Dropbox"""
+    async def smart_process(self) -> ProcessingStatus:
+        """
+        Smart processing - only processes changed files since last sync
+        This is much more efficient than process_all_files()
+        """
         async with self.processing_lock:
             try:
                 self.current_status = ProcessingStatus(
@@ -45,9 +48,65 @@ class ProcessingService:
                     errors=[]
                 )
                 
-                logger.info("Starting full file processing...")
+                logger.info("Starting smart incremental processing...")
                 
-                # Get all files from Dropbox
+                # Get only changed files since last sync
+                dropbox_files, new_cursor = self.dropbox_service.get_incremental_changes()
+                
+                if not dropbox_files:
+                    logger.info("No changes found - processing complete")
+                    self.current_status.status = "completed"
+                    self.current_status.end_time = datetime.now()
+                    return self.current_status
+                
+                # Process only the changed files
+                logger.info(f"Processing {len(dropbox_files)} changed files")
+                self.current_status.files_total = len(dropbox_files)
+                
+                # Process files in batches
+                batch_size = config.BATCH_SIZE
+                for i in range(0, len(dropbox_files), batch_size):
+                    if self.stop_requested:
+                        logger.info("Processing stopped by user request")
+                        self.current_status.status = "stopped"
+                        break
+                        
+                    batch = dropbox_files[i:i + batch_size]
+                    await self._process_batch(batch)
+                    
+                    self.current_status.files_processed += len(batch)
+                    logger.info(f"Smart processing progress: {self.current_status.files_processed}/{self.current_status.files_total}")
+                
+                # Mark as completed if not stopped
+                if not self.stop_requested:
+                    self.current_status.status = "completed"
+                    logger.info(f"Smart processing completed successfully: {self.current_status.files_processed} files processed")
+                
+                self.current_status.end_time = datetime.now()
+                return self.current_status
+                
+            except Exception as e:
+                logger.error(f"Error in smart processing: {e}")
+                self.current_status.status = "failed"
+                self.current_status.errors.append(f"Smart processing failed: {str(e)}")
+                self.current_status.end_time = datetime.now()
+                return self.current_status
+
+    async def process_all_files(self) -> ProcessingStatus:
+        """Process all files in Dropbox - WARNING: This fetches ALL files and should be used sparingly"""
+        async with self.processing_lock:
+            try:
+                self.current_status = ProcessingStatus(
+                    status="running",
+                    files_processed=0,
+                    files_total=0,
+                    start_time=datetime.now(),
+                    errors=[]
+                )
+                
+                logger.warning("Starting FULL file processing - this will fetch ALL files from Dropbox!")
+                
+                # Get all files from Dropbox (expensive operation)
                 dropbox_files = self.dropbox_service.list_files()
                 self.current_status.files_total = len(dropbox_files)
                 
@@ -80,9 +139,10 @@ class ProcessingService:
                 self.current_status.end_time = datetime.now()
                 self.current_status.errors.append(str(e))
                 return self.current_status
-    
+
     async def process_new_files(self, after_date: datetime) -> ProcessingStatus:
-        """Process files modified after a specific date"""
+        """Process files modified after a specific date - DEPRECATED: Use smart_process instead"""
+        logger.warning("process_new_files is deprecated - consider using smart_process() for better efficiency")
         async with self.processing_lock:
             try:
                 self.current_status = ProcessingStatus(
@@ -343,25 +403,33 @@ class ProcessingService:
         return False
     
     def get_stats(self) -> Dict[str, Any]:
-        """Get processing statistics (optimized - doesn't scan entire Dropbox)"""
+        """Get processing statistics - now includes local cache stats"""
         try:
             weaviate_stats = self.weaviate_service.get_stats()
+            cache_stats = self.dropbox_service.cache.get_cache_stats()
             
-            # Use Weaviate data instead of scanning Dropbox every time
+            # Use both Weaviate and cache data
             processed_count = weaviate_stats.get("total_files", 0)
             weaviate_by_type = weaviate_stats.get("by_type", {"image": 0, "video": 0})
             
+            # Cache provides the total Dropbox files count efficiently
+            total_cached_files = cache_stats.get("total_files", 0)
+            cached_by_type = cache_stats.get("by_type", {})
+            
             stats = {
                 "dropbox_files": {
-                    "total": "Scan needed",  # Only show actual count after manual scan
-                    "images": "Scan needed",
-                    "videos": "Scan needed"
+                    "total": total_cached_files if total_cached_files > 0 else "Cache empty - sync needed",
+                    "images": cached_by_type.get("image", "N/A"),
+                    "videos": cached_by_type.get("video", "N/A"),
+                    "cache_status": "populated" if total_cached_files > 0 else "empty"
                 },
                 "processed_files": {
                     "total": processed_count,
                     "images": weaviate_by_type.get("image", 0),
-                    "videos": weaviate_by_type.get("video", 0)
+                    "videos": weaviate_by_type.get("video", 0),
+                    "processing_progress": f"{processed_count}/{total_cached_files}" if total_cached_files > 0 else "N/A"
                 },
+                "local_cache": cache_stats,
                 "weaviate": weaviate_stats,
                 "config": {
                     "batch_size": config.BATCH_SIZE,
@@ -374,7 +442,8 @@ class ProcessingService:
                     "thumbnail_processing": config.USE_THUMBNAILS,
                     "video_preview": config.USE_VIDEO_PREVIEWS,
                     "duplicate_detection": config.SKIP_DUPLICATE_FILES,
-                    "content_hash_tracking": config.TRACK_CONTENT_HASH
+                    "content_hash_tracking": config.TRACK_CONTENT_HASH,
+                    "local_cache_enabled": True
                 },
                 "last_processing": {
                     "status": self.current_status.status,
@@ -393,15 +462,17 @@ class ProcessingService:
             logger.error(f"Error getting stats: {e}")
             return {
                 "error": str(e),
-                "dropbox_files": {"total": "Error", "images": "Error", "videos": "Error"},
+                "dropbox_files": {"total": "Error", "images": "Error", "videos": "Error", "cache_status": "error"},
                 "processed_files": {"total": 0, "images": 0, "videos": 0},
+                "local_cache": {"total_files": 0, "by_type": {}, "error": str(e)},
                 "weaviate": {"total_files": 0, "by_type": {"image": 0, "video": 0}},
                 "config": {"batch_size": config.BATCH_SIZE},
                 "optimization": {
                     "thumbnail_processing": config.USE_THUMBNAILS,
                     "video_preview": config.USE_VIDEO_PREVIEWS,
                     "duplicate_detection": config.SKIP_DUPLICATE_FILES,
-                    "content_hash_tracking": config.TRACK_CONTENT_HASH
+                    "content_hash_tracking": config.TRACK_CONTENT_HASH,
+                    "local_cache_enabled": True
                 },
                 "last_processing": {"status": "error", "files_processed": 0, "files_total": 0}
             }

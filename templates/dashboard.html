@@ -82,12 +82,22 @@
                     
                     <div class="col-md-4 text-end">
                         {% if status.status == "idle" or status.status == "completed" or status.status == "failed" or status.status == "stopped" %}
-                            <button class="btn btn-primary btn-action" onclick="processAllFiles()">
-                                <i class="fas fa-sync"></i> Process All Files
+                            <button class="btn btn-success btn-action" onclick="smartProcessFiles()">
+                                <i class="fas fa-magic"></i> Smart Process
                             </button>
-                            <button class="btn btn-secondary btn-action" onclick="processNewFiles()">
-                                <i class="fas fa-clock"></i> Process New Files
-                            </button>
+                            <div class="dropdown d-inline-block">
+                                <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown">
+                                    <i class="fas fa-cog"></i> Advanced
+                                </button>
+                                <ul class="dropdown-menu">
+                                    <li><a class="dropdown-item" href="#" onclick="processAllFiles()">
+                                        <i class="fas fa-sync text-warning"></i> Full Sync (Slow)
+                                    </a></li>
+                                    <li><a class="dropdown-item" href="#" onclick="processNewFiles()">
+                                        <i class="fas fa-clock text-info"></i> Last 24h Only
+                                    </a></li>
+                                </ul>
+                            </div>
                         {% elif status.status == "running" %}
                             <button class="btn btn-warning btn-action" onclick="pauseProcessing()">
                                 <i class="fas fa-pause"></i> Pause
@@ -246,8 +256,32 @@
 
 {% block extra_scripts %}
 <script>
+function smartProcessFiles() {
+    if (confirm('Start smart processing? This will only process files that have changed since last sync.')) {
+        fetch('/api/process/smart', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.warning) {
+                alert(`Smart processing started!\n\nNote: ${data.note}\n\nCheck the status above.`);
+            } else {
+                alert('Smart processing started! Check the status above.');
+            }
+            location.reload();
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Error starting smart processing. Please try again.');
+        });
+    }
+}
+
 function processAllFiles() {
-    if (confirm('This will process all files in your Dropbox. This may take a while. Continue?')) {
+    if (confirm('⚠️ WARNING: This will process ALL files in your Dropbox!\n\nThis may take a very long time and use many API calls.\n\nConsider using "Smart Process" instead.\n\nContinue with full processing?')) {
         fetch('/api/process/all', {
             method: 'POST',
             headers: {
@@ -256,7 +290,11 @@ function processAllFiles() {
         })
         .then(response => response.json())
         .then(data => {
-            alert('Processing started! Check the status above.');
+            if (data.warning) {
+                alert(`Processing started!\n\nWarning: ${data.warning}\n\nCheck the status above.`);
+            } else {
+                alert('Processing started! Check the status above.');
+            }
             location.reload();
         })
         .catch(error => {
@@ -267,7 +305,7 @@ function processAllFiles() {
 }
 
 function processNewFiles() {
-    if (confirm('This will process files modified in the last 24 hours. Continue?')) {
+    if (confirm('Process files from the last 24 hours?')) {
         fetch('/api/process/new', {
             method: 'POST',
             headers: {
@@ -276,7 +314,11 @@ function processNewFiles() {
         })
         .then(response => response.json())
         .then(data => {
-            alert('Processing started! Check the status above.');
+            if (data.deprecation_warning) {
+                alert(`Processing started!\n\nNote: ${data.deprecation_warning}\n\nCheck the status above.`);
+            } else {
+                alert('Processing started! Check the status above.');
+            }
             location.reload();
         })
         .catch(error => {

@@ -182,9 +182,81 @@ async def get_processing_status():
     
     return processing_service.get_processing_status()
 
+@app.post("/api/cache/sync")
+async def sync_cache(background_tasks: BackgroundTasks):
+    """Sync local cache with Dropbox (recommended before processing)"""
+    if not processing_service:
+        raise HTTPException(status_code=503, detail="Processing service not initialized")
+    
+    # Start cache sync in background
+    background_tasks.add_task(sync_cache_background)
+    
+    return {
+        "message": "Cache sync started", 
+        "status": "initiated",
+        "note": "This will update the local file cache from Dropbox. Much faster than full processing!"
+    }
+
+@app.get("/api/cache/stats")
+async def get_cache_stats():
+    """Get local cache statistics"""
+    if not processing_service:
+        raise HTTPException(status_code=503, detail="Processing service not initialized")
+    
+    try:
+        stats = processing_service.dropbox_service.cache.get_cache_stats()
+        return {"status": "success", "cache_stats": stats}
+    except Exception as e:
+        logger.error(f"Error getting cache stats: {e}")
+        raise HTTPException(status_code=500, detail=f"Error getting cache stats: {e}")
+
+@app.delete("/api/cache/clear")
+async def clear_cache():
+    """Clear local cache (use with caution)"""
+    if not processing_service:
+        raise HTTPException(status_code=503, detail="Processing service not initialized")
+    
+    try:
+        success = processing_service.dropbox_service.cache.clear_cache()
+        if success:
+            return {"message": "Cache cleared successfully", "status": "success"}
+        else:
+            raise HTTPException(status_code=500, detail="Failed to clear cache")
+    except Exception as e:
+        logger.error(f"Error clearing cache: {e}")
+        raise HTTPException(status_code=500, detail=f"Error clearing cache: {e}")
+
+@app.post("/api/process/smart")
+async def smart_process_files(background_tasks: BackgroundTasks):
+    """Start smart incremental processing (recommended) - only processes changed files"""
+    if not processing_service:
+        raise HTTPException(status_code=503, detail="Processing service not initialized")
+    
+    # Check if already processing
+    current_status = processing_service.get_processing_status()
+    if current_status.status == "running":
+        raise HTTPException(status_code=409, detail="Processing already in progress")
+    
+    # Check if cache is empty
+    cache_empty = processing_service.dropbox_service.cache.is_cache_empty() if processing_service else True
+    
+    # Start smart processing in background
+    background_tasks.add_task(smart_process_background)
+    
+    response = {
+        "message": "Smart processing started", 
+        "status": "initiated", 
+        "note": "Only processing files that have changed since last sync"
+    }
+    
+    if cache_empty:
+        response["warning"] = "Cache is empty - this will do a full sync first, then process changes"
+    
+    return response
+
 @app.post("/api/process/all")
 async def process_all_files(background_tasks: BackgroundTasks):
-    """Start processing all files in Dropbox"""
+    """Start processing all files in Dropbox - WARNING: Expensive operation, use sparingly"""
     if not processing_service:
         raise HTTPException(status_code=503, detail="Processing service not initialized")
     
@@ -196,11 +268,15 @@ async def process_all_files(background_tasks: BackgroundTasks):
     # Start processing in background
     background_tasks.add_task(process_all_background)
     
-    return {"message": "Processing started", "status": "initiated"}
+    return {
+        "message": "Full processing started", 
+        "status": "initiated",
+        "warning": "This will fetch ALL files from Dropbox. Consider using /api/process/smart instead."
+    }
 
 @app.post("/api/process/new")
 async def process_new_files(background_tasks: BackgroundTasks, hours_back: int = 24):
-    """Start processing files modified in the last N hours"""
+    """Start processing new files (last N hours) - DEPRECATED: Use /api/process/smart instead"""
     if not processing_service:
         raise HTTPException(status_code=503, detail="Processing service not initialized")
     
@@ -212,7 +288,11 @@ async def process_new_files(background_tasks: BackgroundTasks, hours_back: int =
     # Start processing in background
     background_tasks.add_task(process_new_background, hours_back)
     
-    return {"message": f"Processing files from last {hours_back} hours", "status": "initiated"}
+    return {
+        "message": f"Processing files from last {hours_back} hours", 
+        "status": "initiated",
+        "deprecation_warning": "This endpoint is deprecated. Use /api/process/smart for better efficiency."
+    }
 
 @app.post("/api/process/pause")
 async def pause_processing():
@@ -304,20 +384,36 @@ async def search_page(request: Request):
 
 # Background task functions
 
+async def sync_cache_background():
+    """Background task for syncing local cache with Dropbox"""
+    try:
+        logger.info("Starting cache sync background task")
+        changed_files, cursor = processing_service.dropbox_service.get_incremental_changes()
+        logger.info(f"Cache sync completed: {len(changed_files)} files updated")
+    except Exception as e:
+        logger.error(f"Error in cache sync background task: {e}")
+
+async def smart_process_background():
+    """Background task for smart incremental processing"""
+    try:
+        await processing_service.smart_process()
+    except Exception as e:
+        logger.error(f"Error in smart processing background task: {e}")
+
 async def process_all_background():
-    """Background task to process all files"""
+    """Background task for full processing"""
     try:
         await processing_service.process_all_files()
     except Exception as e:
-        logger.error(f"Error in background processing: {e}")
+        logger.error(f"Error in processing background task: {e}")
 
 async def process_new_background(hours_back: int):
-    """Background task to process new files"""
+    """Background task for processing new files"""
     try:
-        cutoff_date = datetime.now() - timedelta(hours=hours_back)
-        await processing_service.process_new_files(cutoff_date)
+        yesterday = datetime.now() - timedelta(hours=hours_back)
+        await processing_service.process_new_files(yesterday)
     except Exception as e:
-        logger.error(f"Error in background processing: {e}")
+        logger.error(f"Error in new file processing background task: {e}")
 
 # Error handlers
 

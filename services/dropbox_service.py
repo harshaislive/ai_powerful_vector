@@ -7,9 +7,11 @@ from urllib.parse import urlparse
 import logging
 import tempfile
 import hashlib
+import json
 
 from config import config
 from models import DropboxFile
+from services.local_cache_service import LocalCacheService
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +22,11 @@ class DropboxService:
         self.refresh_token = config.DROPBOX_REFRESH_TOKEN
         self.access_token = None
         self.dbx = None
+        self.cursor_file = "dropbox_cursor.json"
+        
+        # Initialize local cache
+        self.cache = LocalCacheService()
+        
         self._initialize_client()
     
     def _initialize_client(self):
@@ -48,8 +55,180 @@ class DropboxService:
         token_data = response.json()
         return token_data['access_token']
     
-    def list_files(self, folder_path: str = "", recursive: bool = True) -> List[DropboxFile]:
-        """List all files in Dropbox folder"""
+    def _save_cursor(self, cursor: str, last_sync: datetime = None):
+        """Save cursor state for incremental sync"""
+        try:
+            cursor_data = {
+                "cursor": cursor,
+                "last_sync": last_sync.isoformat() if last_sync else datetime.now().isoformat(),
+                "created_at": datetime.now().isoformat()
+            }
+            with open(self.cursor_file, 'w') as f:
+                json.dump(cursor_data, f)
+            logger.info(f"Saved cursor state: {cursor[:20]}...")
+        except Exception as e:
+            logger.error(f"Error saving cursor: {e}")
+    
+    def _load_cursor(self) -> Optional[Dict]:
+        """Load cursor state for incremental sync"""
+        try:
+            if os.path.exists(self.cursor_file):
+                with open(self.cursor_file, 'r') as f:
+                    cursor_data = json.load(f)
+                logger.info(f"Loaded cursor state from {cursor_data.get('last_sync', 'unknown')}")
+                return cursor_data
+        except Exception as e:
+            logger.error(f"Error loading cursor: {e}")
+        return None
+    
+    def get_incremental_changes(self) -> tuple[List[DropboxFile], str]:
+        """
+        Get only changed files since last sync using Dropbox delta/continue API
+        Updates local cache with changes
+        Returns: (changed_files, new_cursor)
+        """
+        try:
+            cursor_data = self._load_cursor()
+            
+            # Check if cache is empty - if so, do full sync first
+            if self.cache.is_cache_empty():
+                logger.info("Cache is empty, performing initial full sync")
+                return self._do_full_resync()
+            
+            if cursor_data and cursor_data.get("cursor"):
+                # Use existing cursor for incremental update
+                cursor = cursor_data["cursor"]
+                logger.info(f"Getting incremental changes since {cursor_data.get('last_sync', 'unknown')}")
+                
+                try:
+                    result = self.dbx.files_list_folder_continue(cursor)
+                except dropbox.exceptions.ApiError as e:
+                    if "reset" in str(e).lower():
+                        logger.warning("Cursor expired, doing full resync")
+                        return self._do_full_resync()
+                    raise
+            else:
+                # First time or cursor lost - do initial sync
+                logger.info("No cursor found, doing initial sync")
+                return self._do_full_resync()
+            
+            # Process incremental changes
+            changed_files = []
+            while True:
+                for entry in result.entries:
+                    if isinstance(entry, dropbox.files.FileMetadata):
+                        file_extension = os.path.splitext(entry.name)[1].lower()
+                        
+                        # Filter for supported file types
+                        if (file_extension in config.SUPPORTED_IMAGE_TYPES or 
+                            file_extension in config.SUPPORTED_VIDEO_TYPES):
+                            
+                            file_type = "image" if file_extension in config.SUPPORTED_IMAGE_TYPES else "video"
+                            
+                            dropbox_file = DropboxFile(
+                                id=entry.id,
+                                name=entry.name,
+                                path_lower=entry.path_lower,
+                                path_display=entry.path_display,
+                                size=entry.size,
+                                modified=entry.client_modified,
+                                content_hash=entry.content_hash,
+                                file_type=file_type,
+                                extension=file_extension
+                            )
+                            changed_files.append(dropbox_file)
+                    elif isinstance(entry, dropbox.files.DeletedMetadata):
+                        # Handle deletions - remove from cache
+                        self.cache.remove_file(entry.path_display)
+                        logger.info(f"File deleted from cache: {entry.path_display}")
+                
+                if not result.has_more:
+                    new_cursor = result.cursor
+                    break
+                result = self.dbx.files_list_folder_continue(result.cursor)
+            
+            # Store changed files in cache
+            if changed_files:
+                self.cache.store_files(changed_files, is_full_sync=False)
+            
+            # Save new cursor
+            self._save_cursor(new_cursor)
+            
+            logger.info(f"Found {len(changed_files)} changed files since last sync")
+            return changed_files, new_cursor
+            
+        except Exception as e:
+            logger.error(f"Error getting incremental changes: {e}")
+            # Fallback to full sync on error
+            return self._do_full_resync()
+    
+    def _do_full_resync(self) -> tuple[List[DropboxFile], str]:
+        """Do a full resync when cursor is invalid or missing"""
+        logger.info("Performing full resync...")
+        
+        files = []
+        result = self.dbx.files_list_folder("", recursive=True)
+        
+        while True:
+            for entry in result.entries:
+                if isinstance(entry, dropbox.files.FileMetadata):
+                    file_extension = os.path.splitext(entry.name)[1].lower()
+                    
+                    # Filter for supported file types
+                    if (file_extension in config.SUPPORTED_IMAGE_TYPES or 
+                        file_extension in config.SUPPORTED_VIDEO_TYPES):
+                        
+                        file_type = "image" if file_extension in config.SUPPORTED_IMAGE_TYPES else "video"
+                        
+                        dropbox_file = DropboxFile(
+                            id=entry.id,
+                            name=entry.name,
+                            path_lower=entry.path_lower,
+                            path_display=entry.path_display,
+                            size=entry.size,
+                            modified=entry.client_modified,
+                            content_hash=entry.content_hash,
+                            file_type=file_type,
+                            extension=file_extension
+                        )
+                        files.append(dropbox_file)
+            
+            if not result.has_more:
+                cursor = result.cursor
+                break
+            result = self.dbx.files_list_folder_continue(result.cursor)
+        
+        # Store all files in cache (full sync)
+        if files:
+            self.cache.store_files(files, is_full_sync=True)
+        
+        # Save cursor for future incremental syncs
+        self._save_cursor(cursor)
+        
+        logger.info(f"Full resync completed: {len(files)} files")
+        return files, cursor
+    
+    def list_files(self, folder_path: str = "", recursive: bool = True, use_cache: bool = True) -> List[DropboxFile]:
+        """
+        List files - now cache-first with fallback to Dropbox API
+        
+        Args:
+            folder_path: Folder to list (not fully implemented for cache yet)
+            recursive: Include subfolders (not relevant for cache implementation)
+            use_cache: Whether to use cache first (default: True)
+        """
+        if use_cache and not self.cache.is_cache_empty():
+            # Try cache first
+            logger.info("Getting files from local cache (instant)")
+            cached_files = self.cache.get_files(folder_path)
+            if cached_files:
+                logger.info(f"Retrieved {len(cached_files)} files from cache")
+                return cached_files
+            else:
+                logger.info("Cache empty or no files found, falling back to Dropbox API")
+        
+        # Fallback to original API method
+        logger.warning("Using Dropbox API for file listing (slow) - consider syncing cache first")
         try:
             files = []
             
@@ -223,9 +402,15 @@ class DropboxService:
             logger.error(f"Error downloading file {path}: {e}")
             return False
     
-    def get_files_modified_after(self, after_date: datetime) -> List[DropboxFile]:
-        """Get files modified after a specific date"""
-        all_files = self.list_files()
+    def get_files_modified_after(self, after_date: datetime, use_cache: bool = True) -> List[DropboxFile]:
+        """Get files modified after a specific date - cache-first approach"""
+        if use_cache and not self.cache.is_cache_empty():
+            logger.info("Getting modified files from local cache")
+            return self.cache.get_files_modified_after(after_date)
+        
+        # Fallback to old method (inefficient)
+        logger.warning("Using inefficient method - fetching all files then filtering")
+        all_files = self.list_files(use_cache=False)
         return [f for f in all_files if f.modified > after_date]
 
     def download_file_to_temp(self, path: str) -> Optional[str]:
@@ -356,4 +541,8 @@ class DropboxService:
                 logger.info(f"Cleaned up {cleaned_count} old temporary files")
                 
         except Exception as e:
-            logger.error(f"Error cleaning up temp files: {e}") 
+            logger.error(f"Error cleaning up temp files: {e}")
+
+    def get_file_by_path_cached(self, path: str) -> Optional[DropboxFile]:
+        """Get file by path from cache (instant lookup)"""
+        return self.cache.get_file_by_path(path) 
