@@ -340,35 +340,45 @@ class ProcessingService:
                 else:
                     logger.info(f"File {dropbox_file.name} has changed, reprocessing...")
             
-            # Get local file URL instead of shared link
-            public_url = self.dropbox_service.get_local_file_url(dropbox_file.path_display)
+            # Get Dropbox shared link for public viewing
+            public_url = self.dropbox_service.create_shared_link(dropbox_file.path_display)
             if not public_url:
+                logger.error(f"Could not create shared link for: {dropbox_file.name}")
+                return None
+            
+            # Get local file for processing (AI analysis needs local access)
+            local_processing_url = self.dropbox_service.get_local_file_url(dropbox_file.path_display)
+            if not local_processing_url:
                 logger.error(f"Could not download file for processing: {dropbox_file.name}")
                 return None
             
             # Get optimized URLs based on file type and configuration
             thumbnail_url = None
-            processing_url = public_url  # Default to full size
+            processing_url = local_processing_url  # Use local URL for AI processing
             
             if dropbox_file.file_type == "image" and config.USE_THUMBNAILS:
-                # Use configured thumbnail size for processing to reduce bandwidth
-                thumbnail_url = self.dropbox_service.get_local_thumbnail(
+                # Get Dropbox thumbnail link for display
+                thumbnail_url = self.dropbox_service.get_thumbnail_link(
                     dropbox_file.path_display, 
                     config.THUMBNAIL_SIZE
                 )
-                # Use thumbnail for processing instead of full image
-                processing_url = thumbnail_url or public_url
+                # Use local thumbnail for processing to reduce bandwidth
+                local_thumbnail = self.dropbox_service.get_local_thumbnail(
+                    dropbox_file.path_display, 
+                    config.THUMBNAIL_SIZE
+                )
+                processing_url = local_thumbnail or local_processing_url
                 logger.info(f"Using {config.THUMBNAIL_SIZE} thumbnail for processing: {dropbox_file.name}")
             elif dropbox_file.file_type == "video" and config.USE_VIDEO_PREVIEWS:
-                # For videos, use full file for now (could add video thumbnail later)
-                thumbnail_url = None  # Could implement video thumbnail extraction
-                processing_url = public_url
+                # Get video preview link for display
+                thumbnail_url = self.dropbox_service.get_video_preview_link(dropbox_file.path_display)
+                processing_url = local_processing_url
                 logger.info(f"Processing video: {dropbox_file.name}")
             else:
-                # Use full-size files
-                processing_url = public_url
+                # Use Dropbox shared link for thumbnail display
                 if dropbox_file.file_type == "image":
-                    thumbnail_url = public_url  # Use full image as thumbnail
+                    thumbnail_url = public_url  # Use shared link as thumbnail
+                processing_url = local_processing_url
                 logger.info(f"Using full-size file for processing: {dropbox_file.name}")
             
             # Generate caption

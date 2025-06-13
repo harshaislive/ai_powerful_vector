@@ -598,10 +598,24 @@ function createListItem(result) {
 }
 
 function getImageUrl(result) {
-    // Fix the 404 issue by using public_url instead of broken thumbnail_url
+    // Use thumbnail_url if available and valid, otherwise fallback to public_url
     if (result.file_type === 'image') {
-        // Use public_url directly for images since thumbnails are causing 404s
-        return result.public_url;
+        let imageUrl = null;
+        
+        // Prefer thumbnail_url for better performance, fallback to public_url
+        if (result.thumbnail_url && !result.thumbnail_url.includes('temp_files')) {
+            imageUrl = result.thumbnail_url;
+        } else {
+            imageUrl = result.public_url;
+        }
+        
+        // Convert Dropbox shared links to direct image URLs for better display
+        if (imageUrl && imageUrl.includes('dropbox.com')) {
+            // Convert ?dl=1 to ?raw=1 for direct image display
+            imageUrl = imageUrl.replace('?dl=1', '?raw=1');
+        }
+        
+        return imageUrl;
     }
     return null;
 }
