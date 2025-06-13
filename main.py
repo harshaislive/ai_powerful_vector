@@ -608,6 +608,62 @@ async def initial_process_files(background_tasks: BackgroundTasks):
         "estimated_time": f"~{cached_files // 60} minutes (depending on file types and API speed)"
     }
 
+@app.post("/api/process/initial/images")
+async def initial_process_images(background_tasks: BackgroundTasks):
+    """Initial processing of cached images only"""
+    if not processing_service:
+        raise HTTPException(status_code=503, detail="Processing service not initialized")
+    
+    # Check if already processing
+    current_status = processing_service.get_processing_status()
+    if current_status.status == "running":
+        raise HTTPException(status_code=409, detail="Processing already in progress")
+    
+    # Check cache status
+    cache_stats = processing_service.dropbox_service.cache.get_cache_stats()
+    cached_images = cache_stats.get("by_type", {}).get("image", 0)
+    
+    if cached_images == 0:
+        raise HTTPException(status_code=400, detail="No cached images found. Please sync cache first.")
+    
+    # Start image processing in background
+    background_tasks.add_task(initial_process_images_background)
+    
+    return {
+        "message": f"Initial image processing started for {cached_images} cached images", 
+        "status": "initiated",
+        "note": "This will process only images from cache with BLIP captions and CLIP embeddings",
+        "estimated_time": f"~{cached_images // 60} minutes (images process faster than videos)"
+    }
+
+@app.post("/api/process/initial/videos")
+async def initial_process_videos(background_tasks: BackgroundTasks):
+    """Initial processing of cached videos only"""
+    if not processing_service:
+        raise HTTPException(status_code=503, detail="Processing service not initialized")
+    
+    # Check if already processing
+    current_status = processing_service.get_processing_status()
+    if current_status.status == "running":
+        raise HTTPException(status_code=409, detail="Processing already in progress")
+    
+    # Check cache status
+    cache_stats = processing_service.dropbox_service.cache.get_cache_stats()
+    cached_videos = cache_stats.get("by_type", {}).get("video", 0)
+    
+    if cached_videos == 0:
+        raise HTTPException(status_code=400, detail="No cached videos found. Please sync cache first.")
+    
+    # Start video processing in background
+    background_tasks.add_task(initial_process_videos_background)
+    
+    return {
+        "message": f"Initial video processing started for {cached_videos} cached videos", 
+        "status": "initiated",
+        "note": "This will process only videos from cache with AI-generated captions and embeddings",
+        "estimated_time": f"~{cached_videos // 30} minutes (videos take longer to process)"
+    }
+
 # Background task functions
 
 async def init_cache_background():
@@ -656,6 +712,20 @@ async def initial_process_background():
         await processing_service.process_all_files()
     except Exception as e:
         logger.error(f"Error in initial processing background task: {e}")
+
+async def initial_process_images_background():
+    """Background task for initial processing of cached images only"""
+    try:
+        await processing_service.process_images_only()
+    except Exception as e:
+        logger.error(f"Error in initial image processing background task: {e}")
+
+async def initial_process_videos_background():
+    """Background task for initial processing of cached videos only"""
+    try:
+        await processing_service.process_videos_only()
+    except Exception as e:
+        logger.error(f"Error in initial video processing background task: {e}")
 
 # Error handlers
 

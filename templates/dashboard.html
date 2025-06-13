@@ -180,17 +180,44 @@
                         </h5>
                         <p class="mb-2">
                             You have <strong>{{ stats.local_cache.total_files }} files</strong> in cache but <strong>0 processed files</strong> in Weaviate.
-                            Run initial processing to generate AI embeddings and enable search functionality.
+                            Choose what to process first to generate AI embeddings and enable search functionality.
                         </p>
-                        <small class="text-muted">
-                            This will process all {{ stats.local_cache.total_files }} files with BLIP captions and CLIP embeddings.
-                            Estimated time: ~{{ (stats.local_cache.total_files // 60) }} minutes.
-                        </small>
+                        <div class="row mb-2">
+                            <div class="col-md-6">
+                                <small class="text-muted">
+                                    <i class="fas fa-image text-success"></i> 
+                                    <strong>{{ stats.local_cache.by_type.image or 0 }} images</strong> - 
+                                    Fast processing with BLIP captions
+                                </small>
+                            </div>
+                            <div class="col-md-6">
+                                <small class="text-muted">
+                                    <i class="fas fa-video text-warning"></i> 
+                                    <strong>{{ stats.local_cache.by_type.video or 0 }} videos</strong> - 
+                                    Slower processing, larger files
+                                </small>
+                            </div>
+                        </div>
                     </div>
                     <div class="col-md-4 text-end">
-                        <button class="btn btn-warning btn-lg btn-action" onclick="initialProcessFiles()">
-                            <i class="fas fa-play"></i> Start Initial Processing
+                        {% if stats.local_cache.by_type.image and stats.local_cache.by_type.image > 0 %}
+                        <button class="btn btn-success btn-lg btn-action me-2" onclick="initialProcessImages()">
+                            <i class="fas fa-image"></i> Process Images
+                            <small class="d-block">{{ stats.local_cache.by_type.image }} files</small>
                         </button>
+                        {% endif %}
+                        {% if stats.local_cache.by_type.video and stats.local_cache.by_type.video > 0 %}
+                        <button class="btn btn-warning btn-lg btn-action" onclick="initialProcessVideos()">
+                            <i class="fas fa-video"></i> Process Videos
+                            <small class="d-block">{{ stats.local_cache.by_type.video }} files</small>
+                        </button>
+                        {% endif %}
+                        {% if not stats.local_cache.by_type.image and not stats.local_cache.by_type.video %}
+                        <button class="btn btn-secondary btn-lg btn-action" onclick="initialProcessFiles()">
+                            <i class="fas fa-play"></i> Process All Files
+                            <small class="d-block">{{ stats.local_cache.total_files }} files</small>
+                        </button>
+                        {% endif %}
                     </div>
                 </div>
             </div>
@@ -572,6 +599,46 @@ function initialProcessFiles() {
         .catch(error => {
             console.error('Error:', error);
             alert('Error starting initial processing. Please try again.');
+        });
+    }
+}
+
+function initialProcessImages() {
+    if (confirm('🖼️ Start processing images only?\n\nThis will:\n• Process only IMAGE files from your cache\n• Generate BLIP captions for images\n• Create CLIP embeddings for search\n• Store in Weaviate for searching\n\nImages process faster than videos.\n\nContinue?')) {
+        fetch('/api/process/initial/images', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            alert(`Image processing started!\n\n${data.note}\n\nEstimated time: ${data.estimated_time}\n\nCheck the status above for progress.`);
+            location.reload();
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Error starting image processing. Please try again.');
+        });
+    }
+}
+
+function initialProcessVideos() {
+    if (confirm('🎥 Start processing videos only?\n\nThis will:\n• Process only VIDEO files from your cache\n• Generate AI captions for videos\n• Create embeddings for search\n• Store in Weaviate for searching\n\nVideos take longer to process than images.\n\nContinue?')) {
+        fetch('/api/process/initial/videos', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            alert(`Video processing started!\n\n${data.note}\n\nEstimated time: ${data.estimated_time}\n\nCheck the status above for progress.`);
+            location.reload();
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Error starting video processing. Please try again.');
         });
     }
 }

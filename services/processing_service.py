@@ -199,6 +199,110 @@ class ProcessingService:
                 self.current_status.errors.append(str(e))
                 return self.current_status
     
+    async def process_images_only(self) -> ProcessingStatus:
+        """Process only image files from cache"""
+        async with self.processing_lock:
+            try:
+                # Reset stop flag when starting new processing
+                self.stop_requested = False
+                
+                self.current_status = ProcessingStatus(
+                    status="running",
+                    files_processed=0,
+                    files_total=0,
+                    start_time=datetime.now(),
+                    errors=[]
+                )
+                
+                logger.info("Starting image-only processing from cache")
+                
+                # Get only image files from cache
+                cached_files = self.dropbox_service.cache.get_files()
+                image_files = [f for f in cached_files if f.file_type == "image"]
+                self.current_status.files_total = len(image_files)
+                
+                logger.info(f"Found {len(image_files)} image files to process")
+                
+                # Process files in batches
+                batch_size = config.BATCH_SIZE
+                for i in range(0, len(image_files), batch_size):
+                    # Check for pause before each batch
+                    await self.pause_event.wait()
+                    
+                    # Check if processing was stopped
+                    if self.stop_requested or self.current_status.status == "stopped":
+                        logger.info("Processing stopped by user")
+                        break
+                        
+                    batch = image_files[i:i + batch_size]
+                    await self._process_batch(batch)
+                
+                self.current_status.status = "completed"
+                self.current_status.end_time = datetime.now()
+                
+                logger.info(f"Image processing completed. Processed {self.current_status.files_processed}/{self.current_status.files_total} images")
+                
+                return self.current_status
+                
+            except Exception as e:
+                logger.error(f"Error in process_images_only: {e}")
+                self.current_status.status = "failed"
+                self.current_status.end_time = datetime.now()
+                self.current_status.errors.append(str(e))
+                return self.current_status
+
+    async def process_videos_only(self) -> ProcessingStatus:
+        """Process only video files from cache"""
+        async with self.processing_lock:
+            try:
+                # Reset stop flag when starting new processing
+                self.stop_requested = False
+                
+                self.current_status = ProcessingStatus(
+                    status="running",
+                    files_processed=0,
+                    files_total=0,
+                    start_time=datetime.now(),
+                    errors=[]
+                )
+                
+                logger.info("Starting video-only processing from cache")
+                
+                # Get only video files from cache
+                cached_files = self.dropbox_service.cache.get_files()
+                video_files = [f for f in cached_files if f.file_type == "video"]
+                self.current_status.files_total = len(video_files)
+                
+                logger.info(f"Found {len(video_files)} video files to process")
+                
+                # Process files in batches
+                batch_size = config.BATCH_SIZE
+                for i in range(0, len(video_files), batch_size):
+                    # Check for pause before each batch
+                    await self.pause_event.wait()
+                    
+                    # Check if processing was stopped
+                    if self.stop_requested or self.current_status.status == "stopped":
+                        logger.info("Processing stopped by user")
+                        break
+                        
+                    batch = video_files[i:i + batch_size]
+                    await self._process_batch(batch)
+                
+                self.current_status.status = "completed"
+                self.current_status.end_time = datetime.now()
+                
+                logger.info(f"Video processing completed. Processed {self.current_status.files_processed}/{self.current_status.files_total} videos")
+                
+                return self.current_status
+                
+            except Exception as e:
+                logger.error(f"Error in process_videos_only: {e}")
+                self.current_status.status = "failed"
+                self.current_status.end_time = datetime.now()
+                self.current_status.errors.append(str(e))
+                return self.current_status
+    
     async def _process_batch(self, files: List[DropboxFile]):
         """Process a batch of files"""
         tasks = [self._process_single_file(file) for file in files]
