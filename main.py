@@ -51,7 +51,7 @@ async def lifespan(app: FastAPI):
         
         # Initialize processing service with error handling
         try:
-            processing_service = ProcessingService()
+        processing_service = ProcessingService()
             logger.info("✅ Processing service initialized successfully")
         except Exception as e:
             error_msg = f"❌ Failed to initialize ProcessingService: {str(e)}"
@@ -61,33 +61,33 @@ async def lifespan(app: FastAPI):
         
         # Initialize scheduler (independent of processing service)
         try:
-            scheduler = AsyncIOScheduler()
-            
+        scheduler = AsyncIOScheduler()
+        
             # Only add jobs if processing service is available
             if processing_service:
-                # Schedule daily processing at 10 PM
-                scheduler.add_job(
-                    daily_processing_job,
-                    CronTrigger(hour=config.CRON_HOUR, minute=config.CRON_MINUTE),
-                    id="daily_processing",
-                    name="Daily Dropbox Processing",
-                    replace_existing=True
-                )
-                
-                # Schedule temp file cleanup every 6 hours
-                scheduler.add_job(
-                    cleanup_temp_files_job,
-                    CronTrigger(hour="*/6"),  # Every 6 hours
-                    id="temp_cleanup",
-                    name="Temp Files Cleanup",
-                    replace_existing=True
-                )
+        # Schedule daily processing at 10 PM
+        scheduler.add_job(
+            daily_processing_job,
+            CronTrigger(hour=config.CRON_HOUR, minute=config.CRON_MINUTE),
+            id="daily_processing",
+            name="Daily Dropbox Processing",
+            replace_existing=True
+        )
+        
+        # Schedule temp file cleanup every 6 hours
+        scheduler.add_job(
+            cleanup_temp_files_job,
+            CronTrigger(hour="*/6"),  # Every 6 hours
+            id="temp_cleanup",
+            name="Temp Files Cleanup",
+            replace_existing=True
+        )
                 
                 logger.info(f"✅ Scheduled daily processing at {config.CRON_HOUR:02d}:{config.CRON_MINUTE:02d}")
             else:
                 logger.warning("⚠️ Skipping scheduled jobs - ProcessingService not available")
-            
-            scheduler.start()
+        
+        scheduler.start()
             logger.info("✅ Scheduler initialized successfully")
             
         except Exception as e:
@@ -196,13 +196,13 @@ async def health_check():
     """Health check endpoint - Railway compatible"""
     try:
         health_status = {
-            "status": "healthy",
-            "timestamp": datetime.now().isoformat(),
-            "services": {
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat(),
+        "services": {
                 "app": "running",
-                "processing": processing_service is not None,
+            "processing": processing_service is not None,
                 "scheduler": scheduler is not None and scheduler.running if scheduler else False
-            }
+        }
         }
         
         # Basic service checks without failing the health check
@@ -309,7 +309,7 @@ async def diagnostics():
             "timestamp": datetime.now().isoformat(),
             "error": f"Diagnostics failed: {str(e)}",
             "basic_status": "app_running"
-        }
+    }
 
 @app.get("/api/stats")
 async def get_stats():
@@ -591,6 +591,34 @@ async def get_cache_progress():
         logger.error(f"Error getting cache progress: {e}")
         raise HTTPException(status_code=500, detail=f"Error getting progress: {e}")
 
+@app.post("/api/process/initial")
+async def initial_process_files(background_tasks: BackgroundTasks):
+    """Initial processing of all cached files to populate Weaviate (for first-time setup)"""
+    if not processing_service:
+        raise HTTPException(status_code=503, detail="Processing service not initialized")
+    
+    # Check if already processing
+    current_status = processing_service.get_processing_status()
+    if current_status.status == "running":
+        raise HTTPException(status_code=409, detail="Processing already in progress")
+    
+    # Check cache status
+    cache_stats = processing_service.dropbox_service.cache.get_cache_stats()
+    cached_files = cache_stats.get("total_files", 0)
+    
+    if cached_files == 0:
+        raise HTTPException(status_code=400, detail="No cached files found. Please sync cache first.")
+    
+    # Start initial processing in background
+    background_tasks.add_task(initial_process_background)
+    
+    return {
+        "message": f"Initial processing started for {cached_files} cached files", 
+        "status": "initiated",
+        "note": "This will process all files from cache to populate Weaviate with embeddings and captions",
+        "estimated_time": f"~{cached_files // 60} minutes (depending on file types and API speed)"
+    }
+
 # Background task functions
 
 async def init_cache_background():
@@ -632,6 +660,13 @@ async def process_new_background(hours_back: int):
         await processing_service.process_new_files(yesterday)
     except Exception as e:
         logger.error(f"Error in new file processing background task: {e}")
+
+async def initial_process_background():
+    """Background task for initial processing of all cached files"""
+    try:
+        await processing_service.process_all_files()
+    except Exception as e:
+        logger.error(f"Error in initial processing background task: {e}")
 
 # Error handlers
 

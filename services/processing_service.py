@@ -95,7 +95,7 @@ class ProcessingService:
                 self.current_status.errors.append(f"Smart processing failed: {str(e)}")
                 self.current_status.end_time = datetime.now()
                 return self.current_status
-
+    
     async def process_all_files(self) -> ProcessingStatus:
         """Process all files in Dropbox - WARNING: This fetches ALL files and should be used sparingly"""
         async with self.processing_lock:

@@ -88,7 +88,7 @@
                             <div class="dropdown d-inline-block">
                                 <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown">
                                     <i class="fas fa-cog"></i> Advanced
-                                </button>
+                            </button>
                                 <ul class="dropdown-menu">
                                     <li><a class="dropdown-item" href="#" onclick="processAllFiles()">
                                         <i class="fas fa-sync text-warning"></i> Full Sync (Slow)
@@ -167,6 +167,36 @@
             </div>
         </div>
     </div>
+
+    <!-- Initial Processing Alert (when no files processed) -->
+    {% if stats.weaviate.total_files == 0 and stats.local_cache and stats.local_cache.total_files > 0 %}
+    <div class="row">
+        <div class="col-12">
+            <div class="alert alert-info" role="alert">
+                <div class="row align-items-center">
+                    <div class="col-md-8">
+                        <h5 class="alert-heading">
+                            <i class="fas fa-rocket"></i> Ready for Initial Processing!
+                        </h5>
+                        <p class="mb-2">
+                            You have <strong>{{ stats.local_cache.total_files }} files</strong> in cache but <strong>0 processed files</strong> in Weaviate.
+                            Run initial processing to generate AI embeddings and enable search functionality.
+                        </p>
+                        <small class="text-muted">
+                            This will process all {{ stats.local_cache.total_files }} files with BLIP captions and CLIP embeddings.
+                            Estimated time: ~{{ (stats.local_cache.total_files // 60) }} minutes.
+                        </small>
+                    </div>
+                    <div class="col-md-4 text-end">
+                        <button class="btn btn-warning btn-lg btn-action" onclick="initialProcessFiles()">
+                            <i class="fas fa-play"></i> Start Initial Processing
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
 
     <!-- Cache Management -->
     <div class="row">
@@ -354,7 +384,7 @@ function processAllFiles() {
             if (data.warning) {
                 alert(`Processing started!\n\nWarning: ${data.warning}\n\nCheck the status above.`);
             } else {
-                alert('Processing started! Check the status above.');
+            alert('Processing started! Check the status above.');
             }
             location.reload();
         })
@@ -378,7 +408,7 @@ function processNewFiles() {
             if (data.deprecation_warning) {
                 alert(`Processing started!\n\nNote: ${data.deprecation_warning}\n\nCheck the status above.`);
             } else {
-                alert('Processing started! Check the status above.');
+            alert('Processing started! Check the status above.');
             }
             location.reload();
         })
@@ -522,6 +552,26 @@ function clearCache() {
         .catch(error => {
             console.error('Error:', error);
             alert('Error clearing cache. Please try again.');
+        });
+    }
+}
+
+function initialProcessFiles() {
+    if (confirm('🚀 Start initial processing of all cached files?\n\nThis will:\n• Process ALL files in your cache\n• Generate BLIP captions for images/videos\n• Create CLIP embeddings for search\n• Store everything in Weaviate\n\nThis may take a while depending on your file count.\n\nContinue?')) {
+        fetch('/api/process/initial', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            alert(`Initial processing started!\n\n${data.note}\n\nEstimated time: ${data.estimated_time}\n\nCheck the status above for progress.`);
+            location.reload();
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Error starting initial processing. Please try again.');
         });
     }
 }
