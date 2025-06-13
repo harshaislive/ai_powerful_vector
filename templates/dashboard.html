@@ -186,33 +186,38 @@
                             <div class="col-md-6">
                                 <small class="text-muted">
                                     <i class="fas fa-image text-success"></i> 
-                                    <strong>{{ stats.local_cache.by_type.image or 0 }} images</strong> - 
+                                    <strong>{{ image_count }} images</strong> - 
                                     Fast processing with BLIP captions
                                 </small>
                             </div>
                             <div class="col-md-6">
                                 <small class="text-muted">
                                     <i class="fas fa-video text-warning"></i> 
-                                    <strong>{{ stats.local_cache.by_type.video or 0 }} videos</strong> - 
-                                    Slower processing, larger files
+                                    <strong>{{ video_count }} videos</strong> - 
+                                    Advanced frame analysis
                                 </small>
                             </div>
                         </div>
                     </div>
                     <div class="col-md-4 text-end">
-                        {% if stats.local_cache.by_type.image and stats.local_cache.by_type.image > 0 %}
+                        {% set image_count = stats.local_cache.by_type.image if stats.local_cache.by_type and stats.local_cache.by_type.image else 0 %}
+                        {% set video_count = stats.local_cache.by_type.video if stats.local_cache.by_type and stats.local_cache.by_type.video else 0 %}
+                        
+                        {% if image_count > 0 %}
                         <button class="btn btn-success btn-lg btn-action me-2" onclick="initialProcessImages()">
                             <i class="fas fa-image"></i> Process Images
-                            <small class="d-block">{{ stats.local_cache.by_type.image }} files</small>
+                            <small class="d-block">{{ image_count }} files</small>
                         </button>
                         {% endif %}
-                        {% if stats.local_cache.by_type.video and stats.local_cache.by_type.video > 0 %}
+                        
+                        {% if video_count > 0 %}
                         <button class="btn btn-warning btn-lg btn-action" onclick="initialProcessVideos()">
                             <i class="fas fa-video"></i> Process Videos
-                            <small class="d-block">{{ stats.local_cache.by_type.video }} files</small>
+                            <small class="d-block">{{ video_count }} files</small>
                         </button>
                         {% endif %}
-                        {% if not stats.local_cache.by_type.image and not stats.local_cache.by_type.video %}
+                        
+                        {% if image_count == 0 and video_count == 0 and stats.local_cache.total_files > 0 %}
                         <button class="btn btn-secondary btn-lg btn-action" onclick="initialProcessFiles()">
                             <i class="fas fa-play"></i> Process All Files
                             <small class="d-block">{{ stats.local_cache.total_files }} files</small>
