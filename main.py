@@ -1,5 +1,5 @@
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, FileResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
@@ -307,6 +307,27 @@ async def get_stats():
         raise HTTPException(status_code=503, detail="Processing service not initialized")
     
     return processing_service.get_stats()
+
+@app.get("/files/{filename}")
+async def serve_file(filename: str):
+    """Serve extracted frames and video thumbnails"""
+    try:
+        # Look for file in temp_files directory
+        temp_dir = os.path.join(os.getcwd(), "temp_files")
+        file_path = os.path.join(temp_dir, filename)
+        
+        if os.path.exists(file_path):
+            return FileResponse(
+                file_path,
+                media_type="image/jpeg",
+                headers={"Cache-Control": "public, max-age=3600"}
+            )
+        else:
+            raise HTTPException(status_code=404, detail="File not found")
+            
+    except Exception as e:
+        logger.error(f"Error serving file {filename}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/status")
 async def get_processing_status():

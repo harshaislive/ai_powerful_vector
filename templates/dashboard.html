@@ -307,6 +307,24 @@
                         <td><strong>Supported Videos:</strong></td>
                         <td>{{ ", ".join(stats.config.supported_video_types) }}</td>
                     </tr>
+                    <tr>
+                        <td><strong>Video Frame Interval:</strong></td>
+                        <td>{{ stats.config.video_frame_interval or 10 }}s</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Max Frames per Video:</strong></td>
+                        <td>{{ stats.config.max_frames_per_video or 5 }}</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Video Analysis:</strong></td>
+                        <td>
+                            {% if stats.config.video_analysis_enabled %}
+                                <span class="badge bg-success">Enabled</span>
+                            {% else %}
+                                <span class="badge bg-secondary">Disabled</span>
+                            {% endif %}
+                        </td>
+                    </tr>
                 </table>
             </div>
         </div>

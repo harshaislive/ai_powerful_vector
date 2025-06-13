@@ -3,12 +3,14 @@ import logging
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 import time
+import os
 
 from models import DropboxFile, ProcessedFile, ProcessingStatus
 from services.dropbox_service import DropboxService
 from services.replicate_service import ReplicateService
 from services.clip_service import ClipService
 from services.weaviate_service import WeaviateService
+from services.video_service import VideoService
 from config import config
 
 logger = logging.getLogger(__name__)
@@ -19,6 +21,7 @@ class ProcessingService:
         self.replicate_service = ReplicateService()
         self.clip_service = ClipService()
         self.weaviate_service = WeaviateService()
+        self.video_service = VideoService()
         
         # Processing state
         self.current_status = ProcessingStatus(
@@ -379,9 +382,48 @@ class ProcessingService:
                     # Extract tags from caption
                     tags = self.replicate_service.extract_tags_from_caption(caption)
             elif dropbox_file.file_type == "video":
-                # For videos, use basic caption for now
-                caption = self.replicate_service.generate_video_caption(processing_url)
-                tags = ["video"]
+                # Advanced video processing with frame extraction
+                logger.info(f"Starting advanced video analysis for: {dropbox_file.name}")
+                
+                # Extract frames from video for analysis
+                extracted_frames = await self.video_service.extract_frames_async(processing_url, dropbox_file.id)
+                
+                if extracted_frames:
+                    # Analyze extracted frames to generate comprehensive caption
+                    caption = await self.replicate_service.analyze_video_frames(extracted_frames)
+                    
+                    # Extract tags from video analysis
+                    frame_captions = []
+                    for frame_path in extracted_frames:
+                        try:
+                            frame_filename = os.path.basename(frame_path)
+                            frame_url = f"{config.SERVER_URL}/files/{frame_filename}"
+                            frame_caption = await self.replicate_service.generate_caption_async(frame_url)
+                            if frame_caption:
+                                frame_captions.append(frame_caption)
+                        except:
+                            continue
+                    
+                    tags = self.replicate_service.extract_video_tags(caption, frame_captions)
+                    
+                    # Clean up extracted frames after analysis
+                    self.video_service.cleanup_frames(extracted_frames)
+                    
+                    logger.info(f"Video analysis complete: {len(extracted_frames)} frames analyzed")
+                else:
+                    # Fallback to basic video processing if frame extraction fails
+                    logger.warning(f"Frame extraction failed for {dropbox_file.name}, using basic processing")
+                    caption = f"Video file: {dropbox_file.name}"
+                    tags = ["video"]
+                
+                # Extract video thumbnail if enabled
+                if config.EXTRACT_VIDEO_THUMBNAIL and not thumbnail_url:
+                    video_thumbnail = await self.video_service.extract_thumbnail_async(processing_url, dropbox_file.id)
+                    if video_thumbnail:
+                        # Convert to URL for serving
+                        thumbnail_filename = os.path.basename(video_thumbnail)
+                        thumbnail_url = f"{config.SERVER_URL}/files/{thumbnail_filename}"
+                        logger.info(f"Created video thumbnail: {thumbnail_filename}")
             
             # Generate embedding
             embedding = None
@@ -389,7 +431,7 @@ class ProcessingService:
                 # Get image embedding using CLIP with optimized image
                 embedding = await self.clip_service.get_image_embedding(processing_url)
             elif caption:
-                # Get text embedding from caption
+                # Get text embedding from caption (for videos, this uses the combined frame analysis)
                 embedding = await self.clip_service.get_text_embedding(caption)
             
             if not embedding:
@@ -551,7 +593,11 @@ class ProcessingService:
                     "supported_image_types": list(config.SUPPORTED_IMAGE_TYPES),
                     "supported_video_types": list(config.SUPPORTED_VIDEO_TYPES),
                     "use_thumbnails": config.USE_THUMBNAILS,
-                    "thumbnail_size": config.THUMBNAIL_SIZE
+                    "thumbnail_size": config.THUMBNAIL_SIZE,
+                    "video_frame_interval": config.VIDEO_FRAME_INTERVAL,
+                    "max_frames_per_video": config.MAX_FRAMES_PER_VIDEO,
+                    "video_analysis_enabled": config.VIDEO_ANALYSIS_ENABLED,
+                    "extract_video_thumbnail": config.EXTRACT_VIDEO_THUMBNAIL
                 },
                 "optimization": {
                     "thumbnail_processing": config.USE_THUMBNAILS,

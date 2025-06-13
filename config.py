@@ -49,6 +49,12 @@ class Config:
     SKIP_DUPLICATE_FILES = os.getenv("SKIP_DUPLICATE_FILES", "true").lower() == "true"
     TRACK_CONTENT_HASH = os.getenv("TRACK_CONTENT_HASH", "true").lower() == "true"
     
+    # Video Processing Configuration
+    VIDEO_FRAME_INTERVAL = int(os.getenv("VIDEO_FRAME_INTERVAL", 10))  # seconds between frames
+    MAX_FRAMES_PER_VIDEO = int(os.getenv("MAX_FRAMES_PER_VIDEO", 5))   # maximum frames to analyze
+    EXTRACT_VIDEO_THUMBNAIL = os.getenv("EXTRACT_VIDEO_THUMBNAIL", "true").lower() == "true"
+    VIDEO_ANALYSIS_ENABLED = os.getenv("VIDEO_ANALYSIS_ENABLED", "true").lower() == "true"
+    
     # Supported file types
     SUPPORTED_IMAGE_TYPES = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'}
     SUPPORTED_VIDEO_TYPES = {'.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv'}
