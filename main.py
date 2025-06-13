@@ -308,6 +308,30 @@ async def get_stats():
     
     return processing_service.get_stats()
 
+@app.get("/api/debug/stats")
+async def debug_stats():
+    """Debug endpoint to check stats structure"""
+    if not processing_service:
+        raise HTTPException(status_code=503, detail="Processing service not initialized")
+    
+    stats = processing_service.get_stats()
+    
+    # Add detailed breakdown for debugging
+    debug_info = {
+        "stats": stats,
+        "cache_by_type_exists": "by_type" in stats.get("local_cache", {}),
+        "cache_by_type_value": stats.get("local_cache", {}).get("by_type", "NOT_FOUND"),
+        "cache_total_files": stats.get("local_cache", {}).get("total_files", "NOT_FOUND"),
+        "template_logic": {
+            "image_count": stats.get("local_cache", {}).get("by_type", {}).get("image", 0),
+            "video_count": stats.get("local_cache", {}).get("by_type", {}).get("video", 0),
+            "should_show_image_button": bool(stats.get("local_cache", {}).get("by_type", {}).get("image", 0) > 0),
+            "should_show_video_button": bool(stats.get("local_cache", {}).get("by_type", {}).get("video", 0) > 0),
+        }
+    }
+    
+    return debug_info
+
 @app.get("/files/{filename}")
 async def serve_file(filename: str):
     """Serve extracted frames and video thumbnails"""
@@ -364,6 +388,35 @@ async def get_cache_stats():
     except Exception as e:
         logger.error(f"Error getting cache stats: {e}")
         raise HTTPException(status_code=500, detail=f"Error getting cache stats: {e}")
+
+@app.get("/api/debug/cache")
+async def debug_cache():
+    """Debug endpoint to check raw cache data"""
+    if not processing_service:
+        raise HTTPException(status_code=503, detail="Processing service not initialized")
+    
+    try:
+        # Get raw cache stats
+        cache_stats = processing_service.dropbox_service.cache.get_cache_stats()
+        
+        # Get some sample files to check their file_type
+        sample_files = processing_service.dropbox_service.cache.get_files()[:10]
+        sample_data = []
+        for file in sample_files:
+            sample_data.append({
+                "name": file.name,
+                "file_type": file.file_type,
+                "extension": file.extension
+            })
+        
+        return {
+            "cache_stats": cache_stats,
+            "sample_files": sample_data,
+            "total_sample_files": len(sample_files)
+        }
+    except Exception as e:
+        logger.error(f"Error getting debug cache data: {e}")
+        raise HTTPException(status_code=500, detail=f"Error: {e}")
 
 @app.delete("/api/cache/clear")
 async def clear_cache():
