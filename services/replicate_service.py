@@ -23,13 +23,13 @@ class ReplicateService:
         
         logger.info("Replicate service initialized successfully")
     
-    def generate_caption(self, image_url: str, task: str = "caption") -> Optional[str]:
+    def generate_caption(self, image_url: str, task: str = "image_captioning") -> Optional[str]:
         """
         Generate caption for an image using BLIP model
         
         Args:
             image_url: Public URL of the image
-            task: Task type - "caption" for image captioning
+            task: Task type - "image_captioning" for image captioning
         
         Returns:
             Generated caption or None if failed
@@ -57,7 +57,7 @@ class ReplicateService:
             logger.error(f"Error generating caption for {image_url}: {e}")
             return None
     
-    async def generate_caption_async(self, image_url: str, task: str = "caption") -> Optional[str]:
+    async def generate_caption_async(self, image_url: str, task: str = "image_captioning") -> Optional[str]:
         """
         Async version of generate_caption
         """
@@ -102,7 +102,7 @@ class ReplicateService:
             captions = {}
             
             # Basic caption
-            basic_caption = self.generate_caption(image_url, "caption")
+            basic_caption = self.generate_caption(image_url, "image_captioning")
             if basic_caption:
                 captions["caption"] = basic_caption
             
@@ -111,7 +111,7 @@ class ReplicateService:
                 # What is in this image?
                 detailed = replicate.run(self.blip_model, input={
                     "image": image_url,
-                    "task": "question_answering",
+                    "task": "visual_question_answering",
                     "question": "What objects, people, and activities are in this image?"
                 })
                 if detailed:
