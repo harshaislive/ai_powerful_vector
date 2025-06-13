@@ -215,40 +215,50 @@ class WeaviateService:
         try:
             result = (
                 self.client.query
-                .get("DropboxFile", ["id", "dropbox_path", "file_name", "file_type", "caption", "tags", "metadata", "public_url", "thumbnail_url"])
-                .where({
+                .get("DropboxFile", ["dropbox_path", "file_name", "file_type", "caption", "tags", "metadata", "public_url", "thumbnail_url", "content_hash", "processed_date", "file_size", "modified_date"])
+                .with_where({
                     "path": ["dropbox_path"],
                     "operator": "Equal",
                     "valueText": path
                 })
-                .limit(1)
+                .with_additional(["id"])
+                .with_limit(1)
                 .do()
             )
             
             files = result.get("data", {}).get("Get", {}).get("DropboxFile", [])
-            return files[0] if files else None
+            if files:
+                file_data = files[0]
+                # Add the UUID to the main data
+                file_data["id"] = file_data.get("_additional", {}).get("id", "")
+                return file_data
+            return None
             
         except Exception as e:
             logger.error(f"Error getting file by path {path}: {e}")
             return None
 
     def get_file_by_id(self, file_id: str) -> Optional[Dict[str, Any]]:
-        """Get file by ID"""
+        """Get file by ID using direct UUID access"""
         try:
-            result = (
-                self.client.query
-                .get("DropboxFile", ["id", "dropbox_path", "file_name", "file_type", "caption", "tags", "metadata", "public_url", "thumbnail_url"])
-                .where({
-                    "path": ["id"],
-                    "operator": "Equal",
-                    "valueText": file_id
-                })
-                .limit(1)
-                .do()
-            )
+            result = self.client.data_object.get(file_id, class_name="DropboxFile")
             
-            files = result.get("data", {}).get("Get", {}).get("DropboxFile", [])
-            return files[0] if files else None
+            if result and "properties" in result:
+                # Convert the result to match our expected format
+                properties = result["properties"]
+                file_data = {
+                    "id": result.get("id", ""),
+                    "dropbox_path": properties.get("dropbox_path", ""),
+                    "file_name": properties.get("file_name", ""),
+                    "file_type": properties.get("file_type", ""),
+                    "caption": properties.get("caption", ""),
+                    "tags": properties.get("tags", []),
+                    "metadata": properties.get("metadata", {}),
+                    "public_url": properties.get("public_url", ""),
+                    "thumbnail_url": properties.get("thumbnail_url", "")
+                }
+                return file_data
+            return None
             
         except Exception as e:
             logger.error(f"Error getting file by ID {file_id}: {e}")
