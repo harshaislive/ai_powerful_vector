@@ -2,83 +2,434 @@
 
 {% block title %}Search - Dropbox Vector Search Engine{% endblock %}
 
+{% block extra_head %}
+<style>
+/* Modern Search Styles */
+.search-hero {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 3rem 0;
+    margin-bottom: 2rem;
+}
+
+.search-box {
+    max-width: 600px;
+    margin: 0 auto;
+}
+
+.search-input-group {
+    position: relative;
+    margin-bottom: 1rem;
+}
+
+.search-input {
+    border: none;
+    border-radius: 50px;
+    padding: 1rem 1.5rem;
+    font-size: 1.1rem;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+    width: 100%;
+    padding-right: 60px;
+}
+
+.search-btn {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    border: none;
+    background: #667eea;
+    color: white;
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.filters-row {
+    display: flex;
+    gap: 1rem;
+    justify-content: center;
+    flex-wrap: wrap;
+}
+
+.filter-select {
+    background: rgba(255,255,255,0.2);
+    border: 1px solid rgba(255,255,255,0.3);
+    color: white;
+    border-radius: 25px;
+    padding: 0.5rem 1rem;
+    backdrop-filter: blur(10px);
+}
+
+.filter-select option {
+    background: #333;
+    color: white;
+}
+
+/* Results Grid */
+.results-container {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 0 1rem;
+}
+
+.results-header {
+    margin-bottom: 2rem;
+    text-align: center;
+}
+
+.view-toggle {
+    display: flex;
+    gap: 0.5rem;
+    justify-content: center;
+    margin-bottom: 1rem;
+}
+
+.view-btn {
+    border: 1px solid #ddd;
+    background: white;
+    padding: 0.5rem 1rem;
+    border-radius: 25px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.view-btn.active {
+    background: #667eea;
+    color: white;
+    border-color: #667eea;
+}
+
+/* Grid Layout */
+.results-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    gap: 1rem;
+    margin-bottom: 2rem;
+}
+
+.result-item {
+    background: white;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    transition: all 0.3s ease;
+    cursor: pointer;
+    position: relative;
+}
+
+.result-item:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+}
+
+.result-image {
+    width: 100%;
+    height: 200px;
+    object-fit: cover;
+    background: #f8f9fa;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+}
+
+.result-image img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.result-image.video-placeholder {
+    background: linear-gradient(135deg, #ff6b6b, #feca57);
+    color: white;
+    font-size: 3rem;
+}
+
+.result-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0,0,0,0.7);
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.result-item:hover .result-overlay {
+    opacity: 1;
+}
+
+.result-content {
+    padding: 1rem;
+}
+
+.result-title {
+    font-size: 0.9rem;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+    color: #333;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.result-caption {
+    font-size: 0.8rem;
+    color: #666;
+    margin-bottom: 0.5rem;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.result-meta {
+    display: flex;
+    justify-content: between;
+    align-items: center;
+    font-size: 0.75rem;
+    color: #999;
+}
+
+.similarity-badge {
+    background: #667eea;
+    color: white;
+    padding: 0.2rem 0.5rem;
+    border-radius: 12px;
+    font-size: 0.7rem;
+    font-weight: 600;
+}
+
+.file-type-badge {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    padding: 0.2rem 0.5rem;
+    border-radius: 12px;
+    font-size: 0.7rem;
+    font-weight: 600;
+}
+
+.file-type-badge.image {
+    background: rgba(40, 167, 69, 0.9);
+    color: white;
+}
+
+.file-type-badge.video {
+    background: rgba(255, 193, 7, 0.9);
+    color: black;
+}
+
+/* List Layout */
+.results-list {
+    display: none;
+}
+
+.results-list.active {
+    display: block;
+}
+
+.list-item {
+    background: white;
+    border-radius: 8px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+}
+
+.list-thumbnail {
+    width: 80px;
+    height: 80px;
+    border-radius: 8px;
+    object-fit: cover;
+    flex-shrink: 0;
+}
+
+.list-content {
+    flex: 1;
+}
+
+/* Loading and Empty States */
+.loading-state {
+    text-align: center;
+    padding: 3rem;
+    color: #666;
+}
+
+.empty-state {
+    text-align: center;
+    padding: 3rem;
+    color: #666;
+}
+
+.empty-state i {
+    font-size: 4rem;
+    margin-bottom: 1rem;
+    opacity: 0.5;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .results-grid {
+        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+        gap: 0.5rem;
+    }
+    
+    .result-image {
+        height: 150px;
+    }
+    
+    .filters-row {
+        flex-direction: column;
+        align-items: center;
+    }
+}
+
+/* Modal for full-size viewing */
+.modal-content {
+    border: none;
+    border-radius: 12px;
+}
+
+.modal-body {
+    padding: 0;
+}
+
+.modal-image {
+    width: 100%;
+    border-radius: 12px;
+}
+</style>
+{% endblock %}
+
 {% block content %}
-<!-- Search Header -->
-<div class="search-box">
+<!-- Search Hero Section -->
+<div class="search-hero">
     <div class="container">
-        <div class="row justify-content-center">
-            <div class="col-lg-8">
-                <h1 class="text-center mb-4">
-                    <i class="fas fa-search"></i> Search Your Files
-                </h1>
-                <form id="searchForm" onsubmit="performSearch(event)">
-                    <div class="input-group input-group-lg">
-                        <input type="text" 
-                               class="form-control" 
-                               id="searchInput"
-                               placeholder="Describe what you're looking for..."
-                               value=""
-                               required>
-                        <button class="btn btn-light" type="submit">
-                            <i class="fas fa-search"></i> Search
-                        </button>
-                    </div>
-                    
-                    <!-- Advanced filters -->
-                    <div class="row mt-3">
-                        <div class="col-md-6">
-                            <select class="form-select" id="fileTypeFilter">
-                                <option value="">All file types</option>
-                                <option value="image">Images only</option>
-                                <option value="video">Videos only</option>
-                            </select>
-                        </div>
-                        <div class="col-md-6">
-                            <select class="form-select" id="limitFilter">
-                                <option value="10">10 results</option>
-                                <option value="20">20 results</option>
-                                <option value="50">50 results</option>
-                            </select>
-                        </div>
-                    </div>
-                </form>
-                
-                <div class="text-center mt-3">
-                    <small class="text-light">
-                        Try: "people smiling", "sunset beach", "birthday party", "dogs playing"
-                    </small>
+        <div class="text-center mb-4">
+            <h1><i class="fas fa-search"></i> AI-Powered Search</h1>
+            <p class="lead">Find your images and videos using natural language</p>
+        </div>
+        
+        <div class="search-box">
+            <form id="searchForm" onsubmit="performSearch(event)">
+                <div class="search-input-group">
+                    <input type="text" 
+                           class="search-input" 
+                           id="searchInput"
+                           placeholder="Describe what you're looking for..."
+                           required>
+                    <button type="submit" class="search-btn">
+                        <i class="fas fa-search"></i>
+                    </button>
                 </div>
+                
+                <div class="filters-row">
+                    <select class="filter-select" id="fileTypeFilter">
+                        <option value="">All Types</option>
+                        <option value="image">Images</option>
+                        <option value="video">Videos</option>
+                    </select>
+                    
+                    <select class="filter-select" id="limitFilter">
+                        <option value="20">20 results</option>
+                        <option value="50">50 results</option>
+                        <option value="100">100 results</option>
+                    </select>
+                </div>
+            </form>
+            
+            <div class="text-center mt-3">
+                <small style="opacity: 0.8;">
+                    Try: "people smiling", "sunset beach", "birthday party", "dogs playing"
+                </small>
             </div>
         </div>
     </div>
 </div>
 
-<!-- Search Results -->
-<div class="container">
-    <div class="search-results" id="searchResults">
-        <!-- Results will be loaded here -->
-    </div>
-    
-    <!-- Loading indicator -->
-    <div class="text-center py-5" id="loadingIndicator" style="display: none;">
-        <div class="spinner-border text-primary" role="status">
-            <span class="visually-hidden">Searching...</span>
+<!-- Results Container -->
+<div class="results-container">
+    <!-- Results Header -->
+    <div class="results-header" id="resultsHeader" style="display: none;">
+        <div class="view-toggle">
+            <button class="view-btn active" onclick="switchView('grid')">
+                <i class="fas fa-th"></i> Grid
+            </button>
+            <button class="view-btn" onclick="switchView('list')">
+                <i class="fas fa-list"></i> List
+            </button>
         </div>
-        <p class="mt-2">Searching your files...</p>
+        <div id="resultsInfo"></div>
     </div>
     
-    <!-- No results message -->
-    <div class="text-center py-5" id="noResults" style="display: none;">
-        <i class="fas fa-search fa-3x text-muted mb-3"></i>
+    <!-- Grid View -->
+    <div class="results-grid" id="resultsGrid"></div>
+    
+    <!-- List View -->
+    <div class="results-list" id="resultsList"></div>
+    
+    <!-- Loading State -->
+    <div class="loading-state" id="loadingState" style="display: none;">
+        <div class="spinner-border text-primary mb-3" role="status"></div>
+        <h4>Searching your files...</h4>
+        <p>Using AI to find the best matches</p>
+    </div>
+    
+    <!-- Empty State -->
+    <div class="empty-state" id="emptyState" style="display: none;">
+        <i class="fas fa-search"></i>
         <h4>No results found</h4>
-        <p class="text-muted">Try adjusting your search terms or filters.</p>
+        <p>Try different keywords or check your filters</p>
+    </div>
+</div>
+
+<!-- Image Modal -->
+<div class="modal fade" id="imageModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="modalTitle"></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <img id="modalImage" class="modal-image" src="" alt="">
+                <div class="mt-3">
+                    <p id="modalCaption"></p>
+                    <div id="modalTags"></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-primary" onclick="openOriginalFile()">
+                    <i class="fas fa-external-link-alt"></i> Open Original
+                </button>
+                <button type="button" class="btn btn-secondary" onclick="copyFileLink()">
+                    <i class="fas fa-copy"></i> Copy Link
+                </button>
+            </div>
+        </div>
     </div>
 </div>
 {% endblock %}
 
 {% block extra_scripts %}
 <script>
-let currentQuery = '';
+let currentResults = [];
+let currentView = 'grid';
+let selectedFile = null;
 
 function performSearch(event) {
     event.preventDefault();
@@ -92,12 +443,8 @@ function performSearch(event) {
         return;
     }
     
-    currentQuery = query;
-    
-    // Show loading indicator
-    document.getElementById('loadingIndicator').style.display = 'block';
-    document.getElementById('searchResults').innerHTML = '';
-    document.getElementById('noResults').style.display = 'none';
+    // Show loading state
+    showLoading();
     
     // Build search request
     const searchData = {
@@ -116,133 +463,212 @@ function performSearch(event) {
     })
     .then(response => response.json())
     .then(data => {
-        document.getElementById('loadingIndicator').style.display = 'none';
+        hideLoading();
         displayResults(data);
     })
     .catch(error => {
         console.error('Search error:', error);
-        document.getElementById('loadingIndicator').style.display = 'none';
-        alert('Search failed. Please try again.');
+        hideLoading();
+        showError('Search failed. Please try again.');
     });
     
     // Update URL
     const url = new URL(window.location);
     url.searchParams.set('q', query);
     if (fileType) url.searchParams.set('type', fileType);
-    if (limit !== '10') url.searchParams.set('limit', limit);
+    if (limit !== '20') url.searchParams.set('limit', limit);
     window.history.pushState({}, '', url);
 }
 
+function showLoading() {
+    document.getElementById('loadingState').style.display = 'block';
+    document.getElementById('resultsHeader').style.display = 'none';
+    document.getElementById('resultsGrid').innerHTML = '';
+    document.getElementById('resultsList').innerHTML = '';
+    document.getElementById('emptyState').style.display = 'none';
+}
+
+function hideLoading() {
+    document.getElementById('loadingState').style.display = 'none';
+}
+
 function displayResults(data) {
-    const resultsContainer = document.getElementById('searchResults');
+    currentResults = data.results || [];
     
-    if (!data.results || data.results.length === 0) {
-        document.getElementById('noResults').style.display = 'block';
+    if (currentResults.length === 0) {
+        document.getElementById('emptyState').style.display = 'block';
         return;
     }
     
-    // Results header
-    const header = document.createElement('div');
-    header.className = 'row mb-4';
-    header.innerHTML = `
-        <div class="col-12">
-            <h3>Search Results</h3>
-            <p class="text-muted">
-                Found ${data.total_count} results for "${data.query}" 
-                (${data.processing_time.toFixed(2)}s)
-            </p>
-        </div>
+    // Show results header
+    document.getElementById('resultsHeader').style.display = 'block';
+    document.getElementById('resultsInfo').innerHTML = `
+        <h4>Found ${data.total_count} results for "${data.query}"</h4>
+        <p class="text-muted">Search completed in ${data.processing_time.toFixed(2)} seconds</p>
     `;
-    resultsContainer.appendChild(header);
     
-    // Results list
-    data.results.forEach(result => {
-        const resultCard = createResultCard(result);
-        resultsContainer.appendChild(resultCard);
+    // Display results in current view
+    if (currentView === 'grid') {
+        displayGridResults();
+    } else {
+        displayListResults();
+    }
+}
+
+function displayGridResults() {
+    const grid = document.getElementById('resultsGrid');
+    grid.innerHTML = '';
+    
+    currentResults.forEach((result, index) => {
+        const item = createGridItem(result, index);
+        grid.appendChild(item);
     });
 }
 
-function createResultCard(result) {
-    const card = document.createElement('div');
-    card.className = 'file-card';
+function createGridItem(result, index) {
+    const item = document.createElement('div');
+    item.className = 'result-item';
+    item.onclick = () => openFileModal(result);
     
     const isImage = result.file_type === 'image';
-    const thumbnailUrl = result.thumbnail_url || result.public_url;
+    const imageUrl = getImageUrl(result);
     
-    card.innerHTML = `
-        <div class="row">
-            ${isImage ? `
-                <div class="col-md-2">
-                    <img src="${thumbnailUrl}" 
-                         alt="${result.file_name}"
-                         class="thumbnail"
-                         onclick="openFile('${result.public_url}')"
-                         style="cursor: pointer;">
-                </div>
-                <div class="col-md-10">
-            ` : `
-                <div class="col-md-12">
-            `}
-                <div class="d-flex justify-content-between align-items-start mb-2">
-                    <h5 class="mb-1">
-                        <i class="fas fa-${isImage ? 'image' : 'video'} text-${isImage ? 'success' : 'warning'}"></i>
-                        ${result.file_name}
-                    </h5>
-                    <span class="similarity-score">
-                        ${(result.similarity_score * 100).toFixed(1)}% match
-                    </span>
-                </div>
-                
-                ${result.caption ? `
-                    <p class="mb-2">${result.caption}</p>
-                ` : ''}
-                
-                ${result.tags && result.tags.length > 0 ? `
-                    <div class="file-tags mb-2">
-                        ${result.tags.map(tag => `<span class="tag">${tag}</span>`).join('')}
-                    </div>
-                ` : ''}
-                
-                <div class="file-info">
-                    <i class="fas fa-folder"></i> ${result.dropbox_path} |
-                    <i class="fas fa-calendar"></i> ${new Date(result.modified_date).toLocaleDateString()}
-                </div>
-                
-                <div class="mt-2">
-                    <button class="btn btn-sm btn-primary" onclick="openFile('${result.public_url}')">
-                        <i class="fas fa-external-link-alt"></i> Open File
-                    </button>
-                    <button class="btn btn-sm btn-secondary" onclick="copyLink('${result.public_url}')">
-                        <i class="fas fa-copy"></i> Copy Link
-                    </button>
-                </div>
+    item.innerHTML = `
+        <div class="result-image ${!isImage ? 'video-placeholder' : ''}">
+            ${isImage ? 
+                `<img src="${imageUrl}" alt="${result.file_name}" onerror="this.style.display='none'; this.parentElement.innerHTML='<i class=\\"fas fa-image\\"></i>'">` :
+                `<i class="fas fa-video"></i>`
+            }
+            <div class="result-overlay">
+                <i class="fas fa-${isImage ? 'search-plus' : 'play'}"></i>
+            </div>
+            <div class="file-type-badge ${result.file_type}">
+                ${result.file_type.toUpperCase()}
+            </div>
+        </div>
+        <div class="result-content">
+            <div class="result-title">${result.file_name}</div>
+            ${result.caption ? `<div class="result-caption">${result.caption}</div>` : ''}
+            <div class="result-meta">
+                <span>${new Date(result.modified_date).toLocaleDateString()}</span>
+                <span class="similarity-badge">${(result.similarity_score * 100).toFixed(0)}%</span>
             </div>
         </div>
     `;
     
-    return card;
+    return item;
 }
 
-function openFile(url) {
-    window.open(url, '_blank');
-}
-
-function copyLink(url) {
-    navigator.clipboard.writeText(url).then(() => {
-        // Show temporary success message
-        const toast = document.createElement('div');
-        toast.className = 'alert alert-success position-fixed';
-        toast.style.cssText = 'top: 20px; right: 20px; z-index: 9999; opacity: 0.9;';
-        toast.innerHTML = '<i class="fas fa-check"></i> Link copied to clipboard!';
-        document.body.appendChild(toast);
-        
-        setTimeout(() => {
-            document.body.removeChild(toast);
-        }, 2000);
-    }).catch(err => {
-        console.error('Failed to copy link:', err);
-        alert('Failed to copy link. Please copy manually: ' + url);
+function displayListResults() {
+    const list = document.getElementById('resultsList');
+    list.innerHTML = '';
+    
+    currentResults.forEach(result => {
+        const item = createListItem(result);
+        list.appendChild(item);
     });
+}
+
+function createListItem(result) {
+    const item = document.createElement('div');
+    item.className = 'list-item';
+    item.onclick = () => openFileModal(result);
+    
+    const isImage = result.file_type === 'image';
+    const imageUrl = getImageUrl(result);
+    
+    item.innerHTML = `
+        <div class="list-thumbnail">
+            ${isImage ? 
+                `<img src="${imageUrl}" alt="${result.file_name}" class="list-thumbnail" onerror="this.style.display='none'">` :
+                `<div class="list-thumbnail video-placeholder"><i class="fas fa-video"></i></div>`
+            }
+        </div>
+        <div class="list-content">
+            <h5>${result.file_name}</h5>
+            ${result.caption ? `<p>${result.caption}</p>` : ''}
+            <small class="text-muted">
+                ${result.dropbox_path} • ${new Date(result.modified_date).toLocaleDateString()} • 
+                ${(result.similarity_score * 100).toFixed(1)}% match
+            </small>
+        </div>
+    `;
+    
+    return item;
+}
+
+function getImageUrl(result) {
+    // Fix the 404 issue by using public_url instead of broken thumbnail_url
+    if (result.file_type === 'image') {
+        // Use public_url directly for images since thumbnails are causing 404s
+        return result.public_url;
+    }
+    return null;
+}
+
+function switchView(view) {
+    currentView = view;
+    
+    // Update buttons
+    document.querySelectorAll('.view-btn').forEach(btn => btn.classList.remove('active'));
+    event.target.classList.add('active');
+    
+    // Show/hide views
+    if (view === 'grid') {
+        document.getElementById('resultsGrid').style.display = 'grid';
+        document.getElementById('resultsList').classList.remove('active');
+        displayGridResults();
+    } else {
+        document.getElementById('resultsGrid').style.display = 'none';
+        document.getElementById('resultsList').classList.add('active');
+        displayListResults();
+    }
+}
+
+function openFileModal(result) {
+    selectedFile = result;
+    
+    document.getElementById('modalTitle').textContent = result.file_name;
+    document.getElementById('modalCaption').textContent = result.caption || 'No caption available';
+    
+    if (result.file_type === 'image') {
+        document.getElementById('modalImage').src = result.public_url;
+        document.getElementById('modalImage').style.display = 'block';
+    } else {
+        document.getElementById('modalImage').style.display = 'none';
+    }
+    
+    // Show tags
+    const tagsContainer = document.getElementById('modalTags');
+    if (result.tags && result.tags.length > 0) {
+        tagsContainer.innerHTML = result.tags.map(tag => 
+            `<span class="badge bg-secondary me-1">${tag}</span>`
+        ).join('');
+    } else {
+        tagsContainer.innerHTML = '';
+    }
+    
+    new bootstrap.Modal(document.getElementById('imageModal')).show();
+}
+
+function openOriginalFile() {
+    if (selectedFile) {
+        window.open(selectedFile.public_url, '_blank');
+    }
+}
+
+function copyFileLink() {
+    if (selectedFile) {
+        navigator.clipboard.writeText(selectedFile.public_url).then(() => {
+            alert('Link copied to clipboard!');
+        }).catch(() => {
+            alert('Failed to copy link');
+        });
+    }
+}
+
+function showError(message) {
+    alert(message);
 }
 
 // Auto-search if query parameter is present
