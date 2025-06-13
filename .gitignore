@@ -99,6 +99,9 @@ static/
 *.db
 *.sqlite3
 
+# Exception: Allow cache database for Railway deployment
+!dropbox_cache.db
+
 # Local data directories
 data/
 uploads/

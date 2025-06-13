@@ -30,6 +30,7 @@ class ProcessingService:
         self.is_paused = False
         self.pause_event = asyncio.Event()
         self.pause_event.set()  # Initially not paused
+        self.stop_requested = False  # Add missing stop_requested attribute
         
         logger.info("Processing service initialized")
     
@@ -40,6 +41,9 @@ class ProcessingService:
         """
         async with self.processing_lock:
             try:
+                # Reset stop flag when starting new processing
+                self.stop_requested = False
+                
                 self.current_status = ProcessingStatus(
                     status="running",
                     files_processed=0,
@@ -96,6 +100,9 @@ class ProcessingService:
         """Process all files in Dropbox - WARNING: This fetches ALL files and should be used sparingly"""
         async with self.processing_lock:
             try:
+                # Reset stop flag when starting new processing
+                self.stop_requested = False
+                
                 self.current_status = ProcessingStatus(
                     status="running",
                     files_processed=0,
@@ -119,7 +126,7 @@ class ProcessingService:
                     await self.pause_event.wait()
                     
                     # Check if processing was stopped
-                    if self.current_status.status == "stopped":
+                    if self.stop_requested or self.current_status.status == "stopped":
                         logger.info("Processing stopped by user")
                         break
                         
@@ -139,12 +146,15 @@ class ProcessingService:
                 self.current_status.end_time = datetime.now()
                 self.current_status.errors.append(str(e))
                 return self.current_status
-
+    
     async def process_new_files(self, after_date: datetime) -> ProcessingStatus:
         """Process files modified after a specific date - DEPRECATED: Use smart_process instead"""
         logger.warning("process_new_files is deprecated - consider using smart_process() for better efficiency")
         async with self.processing_lock:
             try:
+                # Reset stop flag when starting new processing
+                self.stop_requested = False
+                
                 self.current_status = ProcessingStatus(
                     status="running",
                     files_processed=0,
@@ -168,7 +178,7 @@ class ProcessingService:
                     await self.pause_event.wait()
                     
                     # Check if processing was stopped
-                    if self.current_status.status == "stopped":
+                    if self.stop_requested or self.current_status.status == "stopped":
                         logger.info("Processing stopped by user")
                         break
                         
@@ -395,6 +405,7 @@ class ProcessingService:
         """Stop the current processing"""
         if self.current_status.status in ["running", "paused"]:
             self.is_paused = False
+            self.stop_requested = True  # Set the stop flag
             self.pause_event.set()
             self.current_status.status = "stopped"
             self.current_status.end_time = datetime.now()

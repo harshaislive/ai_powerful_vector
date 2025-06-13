@@ -36,41 +36,78 @@ async def lifespan(app: FastAPI):
     global processing_service, scheduler
     
     # Startup
+    startup_errors = []
     try:
+        # Run Railway-specific startup checks
+        try:
+            from railway_startup import main as railway_startup
+            railway_startup()
+        except ImportError:
+            logger.info("Railway startup script not found - continuing with standard startup")
+        except Exception as e:
+            logger.warning(f"Railway startup script failed: {e} - continuing anyway")
+        
         logger.info("Starting up Dropbox Vector Search Engine...")
         
-        # Initialize processing service
-        processing_service = ProcessingService()
+        # Initialize processing service with error handling
+        try:
+            processing_service = ProcessingService()
+            logger.info("✅ Processing service initialized successfully")
+        except Exception as e:
+            error_msg = f"❌ Failed to initialize ProcessingService: {str(e)}"
+            logger.error(error_msg)
+            startup_errors.append(error_msg)
+            processing_service = None
         
-        # Initialize scheduler for cron jobs
-        scheduler = AsyncIOScheduler()
+        # Initialize scheduler (independent of processing service)
+        try:
+            scheduler = AsyncIOScheduler()
+            
+            # Only add jobs if processing service is available
+            if processing_service:
+                # Schedule daily processing at 10 PM
+                scheduler.add_job(
+                    daily_processing_job,
+                    CronTrigger(hour=config.CRON_HOUR, minute=config.CRON_MINUTE),
+                    id="daily_processing",
+                    name="Daily Dropbox Processing",
+                    replace_existing=True
+                )
+                
+                # Schedule temp file cleanup every 6 hours
+                scheduler.add_job(
+                    cleanup_temp_files_job,
+                    CronTrigger(hour="*/6"),  # Every 6 hours
+                    id="temp_cleanup",
+                    name="Temp Files Cleanup",
+                    replace_existing=True
+                )
+                
+                logger.info(f"✅ Scheduled daily processing at {config.CRON_HOUR:02d}:{config.CRON_MINUTE:02d}")
+            else:
+                logger.warning("⚠️ Skipping scheduled jobs - ProcessingService not available")
+            
+            scheduler.start()
+            logger.info("✅ Scheduler initialized successfully")
+            
+        except Exception as e:
+            error_msg = f"❌ Failed to initialize scheduler: {str(e)}"
+            logger.error(error_msg)
+            startup_errors.append(error_msg)
+            scheduler = None
         
-        # Schedule daily processing at 10 PM
-        scheduler.add_job(
-            daily_processing_job,
-            CronTrigger(hour=config.CRON_HOUR, minute=config.CRON_MINUTE),
-            id="daily_processing",
-            name="Daily Dropbox Processing",
-            replace_existing=True
-        )
-        
-        # Schedule temp file cleanup every 6 hours
-        scheduler.add_job(
-            cleanup_temp_files_job,
-            CronTrigger(hour="*/6"),  # Every 6 hours
-            id="temp_cleanup",
-            name="Temp Files Cleanup",
-            replace_existing=True
-        )
-        
-        scheduler.start()
-        logger.info(f"Scheduled daily processing at {config.CRON_HOUR:02d}:{config.CRON_MINUTE:02d}")
-        
-        logger.info("Startup completed successfully")
+        # Log startup summary
+        if startup_errors:
+            logger.warning(f"🔥 Startup completed with {len(startup_errors)} errors:")
+            for error in startup_errors:
+                logger.warning(f"   • {error}")
+            logger.warning("📱 App will run in degraded mode - some features may not work")
+        else:
+            logger.info("🎉 Startup completed successfully - all services running")
         
     except Exception as e:
-        logger.error(f"Error during startup: {e}")
-        raise
+        logger.error(f"💥 Critical error during startup: {e}")
+        # Don't raise - let the app start anyway for health checks
     
     yield
     
@@ -156,15 +193,123 @@ async def root(request: Request):
 
 @app.get("/api/health")
 async def health_check():
-    """Health check endpoint"""
-    return {
-        "status": "healthy",
-        "timestamp": datetime.now().isoformat(),
-        "services": {
-            "processing": processing_service is not None,
-            "scheduler": scheduler is not None and scheduler.running
+    """Health check endpoint - Railway compatible"""
+    try:
+        health_status = {
+            "status": "healthy",
+            "timestamp": datetime.now().isoformat(),
+            "services": {
+                "app": "running",
+                "processing": processing_service is not None,
+                "scheduler": scheduler is not None and scheduler.running if scheduler else False
+            }
         }
-    }
+        
+        # Basic service checks without failing the health check
+        if processing_service:
+            try:
+                # Test basic service availability
+                health_status["services"]["dropbox"] = hasattr(processing_service, 'dropbox_service') and processing_service.dropbox_service is not None
+                health_status["services"]["replicate"] = hasattr(processing_service, 'replicate_service') and processing_service.replicate_service is not None
+                health_status["services"]["weaviate"] = hasattr(processing_service, 'weaviate_service') and processing_service.weaviate_service is not None
+                health_status["services"]["clip"] = hasattr(processing_service, 'clip_service') and processing_service.clip_service is not None
+            except Exception as e:
+                health_status["services"]["check_error"] = str(e)
+        
+        return health_status
+        
+    except Exception as e:
+        # Even if there are errors, return 200 OK for Railway health check
+        return {
+            "status": "degraded",
+            "timestamp": datetime.now().isoformat(),
+            "error": str(e),
+            "services": {
+                "app": "running"
+            }
+        }
+
+@app.get("/api/diagnostics")
+async def diagnostics():
+    """Detailed diagnostics for debugging Railway deployment"""
+    try:
+        diagnostics = {
+            "timestamp": datetime.now().isoformat(),
+            "environment": {
+                "port": config.APP_PORT,
+                "host": config.APP_HOST,
+                "server_url": config.SERVER_URL,
+                "railway_domain": os.getenv("RAILWAY_PUBLIC_DOMAIN"),
+                "python_path": sys.path[:3],  # First 3 entries only
+            },
+            "config": {
+                "has_dropbox_client_id": bool(config.DROPBOX_CLIENT_ID),
+                "has_dropbox_secret": bool(config.DROPBOX_CLIENT_SECRET),
+                "has_dropbox_token": bool(config.DROPBOX_REFRESH_TOKEN),
+                "has_replicate_token": bool(config.REPLICATE_API_TOKEN),
+                "weaviate_url": config.WEAVIATE_URL,
+                "has_weaviate_key": bool(config.WEAVIATE_API_KEY and config.WEAVIATE_API_KEY.strip()),
+                "clip_service_url": config.CLIP_SERVICE_URL,
+            },
+            "services": {
+                "processing_service": processing_service is not None,
+                "scheduler": scheduler is not None and scheduler.running if scheduler else False,
+            },
+            "errors": []
+        }
+        
+        # Test individual service connections
+        if processing_service:
+            # Test Dropbox
+            try:
+                if hasattr(processing_service, 'dropbox_service') and processing_service.dropbox_service:
+                    diagnostics["services"]["dropbox"] = "initialized"
+                else:
+                    diagnostics["services"]["dropbox"] = "not_initialized"
+            except Exception as e:
+                diagnostics["services"]["dropbox"] = f"error: {str(e)}"
+                diagnostics["errors"].append(f"Dropbox: {str(e)}")
+            
+            # Test Replicate
+            try:
+                if hasattr(processing_service, 'replicate_service') and processing_service.replicate_service:
+                    diagnostics["services"]["replicate"] = "initialized"
+                else:
+                    diagnostics["services"]["replicate"] = "not_initialized"
+            except Exception as e:
+                diagnostics["services"]["replicate"] = f"error: {str(e)}"
+                diagnostics["errors"].append(f"Replicate: {str(e)}")
+            
+            # Test Weaviate
+            try:
+                if hasattr(processing_service, 'weaviate_service') and processing_service.weaviate_service:
+                    # Test connection
+                    is_ready = processing_service.weaviate_service.client.is_ready()
+                    diagnostics["services"]["weaviate"] = f"initialized_ready_{is_ready}"
+                else:
+                    diagnostics["services"]["weaviate"] = "not_initialized"
+            except Exception as e:
+                diagnostics["services"]["weaviate"] = f"error: {str(e)}"
+                diagnostics["errors"].append(f"Weaviate: {str(e)}")
+            
+            # Test CLIP
+            try:
+                if hasattr(processing_service, 'clip_service') and processing_service.clip_service:
+                    diagnostics["services"]["clip"] = "initialized"
+                else:
+                    diagnostics["services"]["clip"] = "not_initialized"
+            except Exception as e:
+                diagnostics["services"]["clip"] = f"error: {str(e)}"
+                diagnostics["errors"].append(f"CLIP: {str(e)}")
+        
+        return diagnostics
+        
+    except Exception as e:
+        return {
+            "timestamp": datetime.now().isoformat(),
+            "error": f"Diagnostics failed: {str(e)}",
+            "basic_status": "app_running"
+        }
 
 @app.get("/api/stats")
 async def get_stats():
