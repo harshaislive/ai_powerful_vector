@@ -353,6 +353,88 @@ async def serve_file(filename: str):
         logger.error(f"Error serving file {filename}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/image/{file_id}")
+async def get_image_from_dropbox(file_id: str):
+    """Get image directly from Dropbox using file ID from Weaviate"""
+    try:
+        if not processing_service:
+            raise HTTPException(status_code=503, detail="Processing service not initialized")
+        
+        # Get file info from Weaviate using the file ID
+        file_data = processing_service.weaviate_service.get_file_by_id(file_id)
+        if not file_data:
+            raise HTTPException(status_code=404, detail="File not found in database")
+        
+        # Get the Dropbox path
+        dropbox_path = file_data.get("dropbox_path")
+        if not dropbox_path:
+            raise HTTPException(status_code=404, detail="Dropbox path not found")
+        
+        # Create fresh Dropbox shared link
+        shared_link = processing_service.dropbox_service.create_shared_link(dropbox_path)
+        if not shared_link:
+            raise HTTPException(status_code=404, detail="Could not create Dropbox shared link")
+        
+        # Convert to direct image URL
+        direct_url = shared_link.replace('?dl=1', '?raw=1')
+        
+        # Redirect to the Dropbox image
+        return RedirectResponse(url=direct_url, status_code=302)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting image from Dropbox for file {file_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/thumbnail/{file_id}")
+async def get_thumbnail_from_dropbox(file_id: str, size: str = "medium"):
+    """Get thumbnail directly from Dropbox using file ID from Weaviate"""
+    try:
+        if not processing_service:
+            raise HTTPException(status_code=503, detail="Processing service not initialized")
+        
+        # Get file info from Weaviate using the file ID
+        file_data = processing_service.weaviate_service.get_file_by_id(file_id)
+        if not file_data:
+            raise HTTPException(status_code=404, detail="File not found in database")
+        
+        # Get the Dropbox path
+        dropbox_path = file_data.get("dropbox_path")
+        file_type = file_data.get("file_type", "")
+        
+        if not dropbox_path:
+            raise HTTPException(status_code=404, detail="Dropbox path not found")
+        
+        # Generate appropriate link based on file type
+        if file_type == "image":
+            # Get Dropbox thumbnail
+            thumbnail_link = processing_service.dropbox_service.get_thumbnail_link(dropbox_path, size)
+            if thumbnail_link:
+                direct_url = thumbnail_link.replace('?dl=1', '?raw=1')
+                return RedirectResponse(url=direct_url, status_code=302)
+            
+            # Fallback to full image
+            shared_link = processing_service.dropbox_service.create_shared_link(dropbox_path)
+            if shared_link:
+                direct_url = shared_link.replace('?dl=1', '?raw=1')
+                return RedirectResponse(url=direct_url, status_code=302)
+        
+        elif file_type == "video":
+            # Get video preview
+            preview_link = processing_service.dropbox_service.get_video_preview_link(dropbox_path)
+            if preview_link:
+                direct_url = preview_link.replace('?dl=1', '?raw=1')
+                return RedirectResponse(url=direct_url, status_code=302)
+        
+        raise HTTPException(status_code=404, detail="Could not generate thumbnail")
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting thumbnail from Dropbox for file {file_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/api/status")
 async def get_processing_status():
     """Get current processing status"""

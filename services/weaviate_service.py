@@ -210,34 +210,48 @@ class WeaviateService:
             logger.error(f"Error storing file {processed_file.file_name}: {e}")
             return False
     
-    def get_file_by_path(self, dropbox_path: str) -> Optional[Dict]:
-        """Get file by Dropbox path with content hash for duplicate detection"""
+    def get_file_by_path(self, path: str) -> Optional[Dict[str, Any]]:
+        """Get file by Dropbox path"""
         try:
             result = (
                 self.client.query
-                .get("DropboxFile", [
-                    "dropbox_path", "file_name", "content_hash", 
-                    "processed_date", "file_size", "modified_date"
-                ])
-                .with_where({
+                .get("DropboxFile", ["id", "dropbox_path", "file_name", "file_type", "caption", "tags", "metadata", "public_url", "thumbnail_url"])
+                .where({
                     "path": ["dropbox_path"],
                     "operator": "Equal",
-                    "valueText": dropbox_path
+                    "valueText": path
                 })
-                .with_additional(["id"])
+                .limit(1)
                 .do()
             )
             
             files = result.get("data", {}).get("Get", {}).get("DropboxFile", [])
-            if files:
-                file_data = files[0]
-                # Add the UUID to the main data
-                file_data["id"] = file_data.get("_additional", {}).get("id", "")
-                return file_data
-            return None
+            return files[0] if files else None
             
         except Exception as e:
-            logger.error(f"Error getting file by path {dropbox_path}: {e}")
+            logger.error(f"Error getting file by path {path}: {e}")
+            return None
+
+    def get_file_by_id(self, file_id: str) -> Optional[Dict[str, Any]]:
+        """Get file by ID"""
+        try:
+            result = (
+                self.client.query
+                .get("DropboxFile", ["id", "dropbox_path", "file_name", "file_type", "caption", "tags", "metadata", "public_url", "thumbnail_url"])
+                .where({
+                    "path": ["id"],
+                    "operator": "Equal",
+                    "valueText": file_id
+                })
+                .limit(1)
+                .do()
+            )
+            
+            files = result.get("data", {}).get("Get", {}).get("DropboxFile", [])
+            return files[0] if files else None
+            
+        except Exception as e:
+            logger.error(f"Error getting file by ID {file_id}: {e}")
             return None
     
     def search_similar(self, query_embedding: List[float], limit: int = 10, 

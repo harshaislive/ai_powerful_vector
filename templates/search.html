@@ -126,27 +126,73 @@
     box-shadow: 0 8px 25px rgba(0,0,0,0.15);
 }
 
-.result-image {
+.result-image-container {
+    position: relative;
     width: 100%;
     height: 200px;
-    object-fit: cover;
-    background: #f8f9fa;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    position: relative;
+    overflow: hidden;
+    border-radius: 12px;
 }
 
-.result-image img {
+.result-image {
     width: 100%;
     height: 100%;
     object-fit: cover;
 }
 
-.result-image.video-placeholder {
-    background: linear-gradient(135deg, #ff6b6b, #feca57);
+.video-thumbnail {
+    position: relative;
+    width: 100%;
+    height: 100%;
+}
+
+.video-overlay {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: rgba(0, 0, 0, 0.7);
     color: white;
-    font-size: 3rem;
+    border-radius: 50%;
+    width: 50px;
+    height: 50px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.2rem;
+}
+
+.result-actions {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.action-btn {
+    background: rgba(255, 255, 255, 0.9);
+    border: none;
+    border-radius: 50%;
+    width: 35px;
+    height: 35px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.action-btn:hover {
+    background: white;
+    transform: scale(1.1);
+}
+
+.result-caption {
+    font-size: 0.8rem;
+    color: #666;
+    margin-top: 0.5rem;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
 }
 
 .result-overlay {
@@ -168,8 +214,8 @@
     opacity: 1;
 }
 
-.result-content {
-    padding: 1rem;
+.result-info {
+    text-align: center;
 }
 
 .result-title {
@@ -177,16 +223,6 @@
     font-weight: 600;
     margin-bottom: 0.5rem;
     color: #333;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-}
-
-.result-caption {
-    font-size: 0.8rem;
-    color: #666;
-    margin-bottom: 0.5rem;
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
@@ -201,7 +237,7 @@
     color: #999;
 }
 
-.similarity-badge {
+.similarity-score {
     background: #667eea;
     color: white;
     padding: 0.2rem 0.5rem;
@@ -531,29 +567,50 @@ function createGridItem(result, index) {
     item.onclick = () => openFileModal(result);
     
     const isImage = result.file_type === 'image';
-    const imageUrl = getImageUrl(result);
+    const fileId = result.id;
+    const thumbnailUrl = `/api/thumbnail/${fileId}`;
+    const fullImageUrl = `/api/image/${fileId}`;
+    
+    const caption = result.caption || '';
+    const truncatedCaption = caption.length > 100 ? caption.substring(0, 100) + '...' : caption;
     
     item.innerHTML = `
-        <div class="result-image ${!isImage ? 'video-placeholder' : ''}">
-            ${isImage ? 
-                `<img src="${imageUrl}" alt="${result.file_name}" onerror="this.style.display='none'; this.parentElement.innerHTML='<i class=\\"fas fa-image\\"></i>'">` :
-                `<i class="fas fa-video"></i>`
-            }
+        <div class="result-image-container">
+            ${isImage ? `
+                <img src="${thumbnailUrl}" 
+                     alt="${result.file_name}" 
+                     class="result-image"
+                     onerror="this.onerror=null; this.src='${fullImageUrl}'; this.classList.add('fallback-image');">
+            ` : `
+                <div class="video-thumbnail">
+                    <img src="${thumbnailUrl}" 
+                         alt="${result.file_name}" 
+                         class="result-image"
+                         onerror="this.onerror=null; this.src='/static/video-placeholder.svg';">
+                    <div class="video-overlay">
+                        <i class="fas fa-play"></i>
+                    </div>
+                </div>
+            `}
             <div class="result-overlay">
-                <i class="fas fa-${isImage ? 'search-plus' : 'play'}"></i>
-            </div>
-            <div class="file-type-badge ${result.file_type}">
-                ${result.file_type.toUpperCase()}
+                <div class="result-info">
+                    <div class="result-title">${result.file_name}</div>
+                    <div class="result-meta">
+                        <span class="file-type-badge ${result.file_type}">${result.file_type.toUpperCase()}</span>
+                        <span class="similarity-score">${(result.similarity * 100).toFixed(1)}%</span>
+                    </div>
+                </div>
+                <div class="result-actions">
+                    <button class="action-btn view-btn" onclick="event.stopPropagation(); viewFile('${fileId}', '${result.file_type}', '${result.file_name}')">
+                        <i class="fas fa-eye"></i>
+                    </button>
+                    <button class="action-btn download-btn" onclick="event.stopPropagation(); downloadFile('${fileId}', '${result.file_name}')">
+                        <i class="fas fa-download"></i>
+                    </button>
+                </div>
             </div>
         </div>
-        <div class="result-content">
-            <div class="result-title">${result.file_name}</div>
-            ${result.caption ? `<div class="result-caption">${result.caption}</div>` : ''}
-            <div class="result-meta">
-                <span>${new Date(result.modified_date).toLocaleDateString()}</span>
-                <span class="similarity-badge">${(result.similarity_score * 100).toFixed(0)}%</span>
-            </div>
-        </div>
+        <div class="result-caption">${truncatedCaption}</div>
     `;
     
     return item;
@@ -575,12 +632,13 @@ function createListItem(result) {
     item.onclick = () => openFileModal(result);
     
     const isImage = result.file_type === 'image';
-    const imageUrl = getImageUrl(result);
+    const fileId = result.id;
+    const thumbnailUrl = `/api/thumbnail/${fileId}`;
     
     item.innerHTML = `
         <div class="list-thumbnail">
             ${isImage ? 
-                `<img src="${imageUrl}" alt="${result.file_name}" class="list-thumbnail" onerror="this.style.display='none'">` :
+                `<img src="${thumbnailUrl}" alt="${result.file_name}" class="list-thumbnail" onerror="this.style.display='none'">` :
                 `<div class="list-thumbnail video-placeholder"><i class="fas fa-video"></i></div>`
             }
         </div>
@@ -589,7 +647,7 @@ function createListItem(result) {
             ${result.caption ? `<p>${result.caption}</p>` : ''}
             <small class="text-muted">
                 ${result.dropbox_path} • ${new Date(result.modified_date).toLocaleDateString()} • 
-                ${(result.similarity_score * 100).toFixed(1)}% match
+                ${(result.similarity * 100).toFixed(1)}% match
             </small>
         </div>
     `;
@@ -646,7 +704,8 @@ function openFileModal(result) {
     document.getElementById('modalCaption').textContent = result.caption || 'No caption available';
     
     if (result.file_type === 'image') {
-        document.getElementById('modalImage').src = result.public_url;
+        const fullImageUrl = `/api/image/${result.id}`;
+        document.getElementById('modalImage').src = fullImageUrl;
         document.getElementById('modalImage').style.display = 'block';
     } else {
         document.getElementById('modalImage').style.display = 'none';
@@ -665,15 +724,36 @@ function openFileModal(result) {
     new bootstrap.Modal(document.getElementById('imageModal')).show();
 }
 
+function viewFile(fileId, fileType, fileName) {
+    // Find the result by ID
+    const result = currentResults.find(r => r.id === fileId);
+    if (result) {
+        openFileModal(result);
+    }
+}
+
+function downloadFile(fileId, fileName) {
+    // Open the full image URL which will redirect to Dropbox
+    const downloadUrl = `/api/image/${fileId}`;
+    const link = document.createElement('a');
+    link.href = downloadUrl;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+}
+
 function openOriginalFile() {
     if (selectedFile) {
-        window.open(selectedFile.public_url, '_blank');
+        const originalUrl = `/api/image/${selectedFile.id}`;
+        window.open(originalUrl, '_blank');
     }
 }
 
 function copyFileLink() {
     if (selectedFile) {
-        navigator.clipboard.writeText(selectedFile.public_url).then(() => {
+        const fileUrl = `/api/image/${selectedFile.id}`;
+        navigator.clipboard.writeText(window.location.origin + fileUrl).then(() => {
             alert('Link copied to clipboard!');
         }).catch(() => {
             alert('Failed to copy link');
