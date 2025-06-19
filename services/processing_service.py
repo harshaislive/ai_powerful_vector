@@ -396,13 +396,20 @@ class ProcessingService:
             tags = []
             
             if dropbox_file.file_type == "image":
-                # Generate caption using Azure Computer Vision or Replicate as fallback
+                # Generate caption using Azure Computer Vision with LOCAL FILES (more reliable)
                 if self.use_azure_vision and self.azure_vision_service:
                     try:
-                        # Use Azure Vision service with enhanced functionality
+                        # Use Azure Vision service with LOCAL FILE processing (binary upload)
+                        local_file_path = self.dropbox_service.get_local_file_path(dropbox_file.path_display)
+                        if local_file_path and os.path.exists(local_file_path):
+                            caption, azure_tags = await self.azure_vision_service.generate_caption_with_tags_from_local(local_file_path)
+                            tags = azure_tags  # Azure provides excellent tags
+                            logger.info(f"Azure Vision (LOCAL) - Caption: {caption}, Tags: {tags[:5]}... for {dropbox_file.name}")
+                        else:
+                            # Fallback to URL-based if local file not available
                         caption, azure_tags = await self.azure_vision_service.generate_caption_with_tags(processing_url)
-                        tags = azure_tags  # Azure already provides good tags
-                        logger.info(f"Azure Vision - Caption generated for {dropbox_file.name}")
+                            tags = azure_tags
+                            logger.info(f"Azure Vision (URL fallback) - Caption generated for {dropbox_file.name}")
                     except Exception as e:
                         logger.warning(f"Azure Vision failed for {dropbox_file.name}: {e}. Falling back to Replicate")
                         try:
@@ -437,16 +444,18 @@ class ProcessingService:
                             # Use Azure Vision for video frame analysis
                             caption = await self.azure_vision_service.analyze_video_frames(extracted_frames)
                             
-                            # Extract tags from video analysis using Azure Vision
+                            # Extract tags from video analysis using Azure Vision with LOCAL FILES
                             frame_captions = []
                             for frame_path in extracted_frames:
                                 try:
-                                    frame_filename = os.path.basename(frame_path)
-                                    frame_url = f"{config.SERVER_URL}/files/{frame_filename}"
-                                    frame_caption = await self.azure_vision_service.generate_caption_async(frame_url)
+                                    # Use local file path directly for Azure Vision (more reliable)
+                                    if os.path.exists(frame_path):
+                                        frame_caption = await self.azure_vision_service.generate_caption_from_local_file(frame_path)
                                     if frame_caption:
                                         frame_captions.append(frame_caption)
-                                except:
+                                            logger.debug(f"Frame caption (LOCAL): {frame_caption}")
+                                except Exception as frame_error:
+                                    logger.warning(f"Failed to process frame {frame_path}: {frame_error}")
                                     continue
                             
                             tags = self.azure_vision_service.extract_video_tags(caption, frame_captions)

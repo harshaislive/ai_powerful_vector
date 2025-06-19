@@ -49,6 +49,29 @@ class WeaviateService:
                     "class": "DropboxFile",
                     "description": "A file from Dropbox with embeddings and metadata",
                     "vectorizer": "none",  # We'll provide our own vectors
+                    "vectorIndexType": "hnsw",  # CRITICAL: Enable vector index
+                    "vectorIndexConfig": {
+                        "skip": False,
+                        "cleanupIntervalSeconds": 300,
+                        "pq": {
+                            "enabled": False,
+                            "bitCompression": False,
+                            "segments": 0,
+                            "centroids": 256,
+                            "encoder": {
+                                "type": "kmeans",
+                                "distribution": "log-normal"
+                            }
+                        },
+                        "vectorCacheMaxObjects": 1000000,
+                        "maxConnections": 64,
+                        "efConstruction": 128,
+                        "ef": -1,
+                        "dynamicEfMin": 100,
+                        "dynamicEfMax": 500,
+                        "dynamicEfFactor": 8,
+                        "distance": "cosine"  # CRITICAL: Set distance metric
+                    },
                     "properties": [
                         {
                             "name": "dropbox_id",
@@ -146,13 +169,89 @@ class WeaviateService:
                 }
                 
                 self.client.schema.create_class(class_schema)
-                logger.info("Created DropboxFile schema in Weaviate")
+                logger.info("Created DropboxFile schema in Weaviate with vector index support")
             else:
                 logger.info("DropboxFile schema already exists")
                 
         except Exception as e:
             logger.error(f"Error creating schema: {e}")
             raise
+    
+    def validate_vector_setup(self) -> Dict[str, Any]:
+        """
+        Validate that Weaviate is properly configured for vector search
+        
+        Returns:
+            Dictionary with validation results
+        """
+        try:
+            # Check if schema exists
+            schema = self.client.schema.get()
+            classes = schema.get("classes", [])
+            
+            dropbox_class = None
+            for cls in classes:
+                if cls["class"] == "DropboxFile":
+                    dropbox_class = cls
+                    break
+            
+            if not dropbox_class:
+                return {
+                    "valid": False,
+                    "error": "DropboxFile class not found in schema",
+                    "recommendations": ["Run schema creation first"]
+                }
+            
+            # Check vector configuration
+            vector_config = dropbox_class.get("vectorIndexConfig", {})
+            vector_index_type = dropbox_class.get("vectorIndexType")
+            
+            issues = []
+            if vector_index_type != "hnsw":
+                issues.append(f"Vector index type is '{vector_index_type}', should be 'hnsw'")
+            
+            if vector_config.get("skip", True):
+                issues.append("Vector indexing is disabled (skip=True)")
+            
+            if vector_config.get("distance") != "cosine":
+                issues.append(f"Distance metric is '{vector_config.get('distance')}', should be 'cosine'")
+            
+            # Check if we have any data with vectors
+            sample_query = (
+                self.client.query
+                .get("DropboxFile", ["file_name"])
+                .with_additional(["vector"])
+                .with_limit(1)
+                .do()
+            )
+            
+            files = sample_query.get("data", {}).get("Get", {}).get("DropboxFile", [])
+            has_vectors = False
+            if files:
+                vector_data = files[0].get("_additional", {}).get("vector")
+                has_vectors = bool(vector_data and len(vector_data) > 0)
+            
+            return {
+                "valid": len(issues) == 0,
+                "schema_exists": True,
+                "vector_index_type": vector_index_type,
+                "vector_config": vector_config,
+                "issues": issues,
+                "has_sample_vectors": has_vectors,
+                "sample_vector_dimensions": len(files[0].get("_additional", {}).get("vector", [])) if files and has_vectors else 0,
+                "recommendations": [
+                    "Delete and recreate schema if vector config is wrong",
+                    "Process some files to generate vectors",
+                    "Test vector search functionality"
+                ] if issues else ["Vector setup looks good!"]
+            }
+            
+        except Exception as e:
+            return {
+                "valid": False,
+                "error": f"Error validating vector setup: {str(e)}",
+                "recommendations": ["Check Weaviate connection", "Verify schema creation"]
+            }
     
     def store_file(self, processed_file: ProcessedFile) -> bool:
         """
@@ -165,6 +264,18 @@ class WeaviateService:
             True if successful, False otherwise
         """
         try:
+            # CRITICAL: Validate embedding exists and has correct dimensions
+            if not processed_file.embedding:
+                logger.error(f"No embedding provided for file: {processed_file.file_name}")
+                return False
+            
+            if not isinstance(processed_file.embedding, list) or len(processed_file.embedding) == 0:
+                logger.error(f"Invalid embedding format for file: {processed_file.file_name}")
+                return False
+            
+            # Log embedding info for debugging
+            logger.info(f"Storing file with {len(processed_file.embedding)}-dimensional embedding: {processed_file.file_name}")
+            
             # Prepare data object
             data_object = {
                 "dropbox_id": processed_file.id,
@@ -187,27 +298,31 @@ class WeaviateService:
             existing = self.get_file_by_path(processed_file.dropbox_path)
             
             if existing:
-                # Update existing file
+                # Update existing file WITH VECTOR
+                logger.info(f"Updating existing file with vector: {processed_file.file_name}")
                 self.client.data_object.update(
                     data_object=data_object,
                     class_name="DropboxFile",
                     uuid=existing["id"],
-                    vector=processed_file.embedding
+                    vector=processed_file.embedding  # CRITICAL: Include vector
                 )
-                logger.info(f"Updated existing file: {processed_file.file_name}")
+                logger.info(f"Updated existing file with {len(processed_file.embedding)}-dim vector: {processed_file.file_name}")
             else:
-                # Create new file
-                self.client.data_object.create(
+                # Create new file WITH VECTOR
+                logger.info(f"Creating new file with vector: {processed_file.file_name}")
+                result = self.client.data_object.create(
                     data_object=data_object,
                     class_name="DropboxFile",
-                    vector=processed_file.embedding
+                    vector=processed_file.embedding  # CRITICAL: Include vector
                 )
-                logger.info(f"Stored new file: {processed_file.file_name}")
+                logger.info(f"Created new file with {len(processed_file.embedding)}-dim vector: {processed_file.file_name}")
+                logger.debug(f"Weaviate response: {result}")
             
             return True
             
         except Exception as e:
             logger.error(f"Error storing file {processed_file.file_name}: {e}")
+            logger.error(f"Embedding info - Type: {type(processed_file.embedding)}, Length: {len(processed_file.embedding) if processed_file.embedding else 'None'}")
             return False
     
     def get_file_by_path(self, path: str) -> Optional[Dict[str, Any]]:
@@ -278,6 +393,13 @@ class WeaviateService:
             List of SearchResult objects
         """
         try:
+            # CRITICAL: Validate query embedding
+            if not query_embedding or not isinstance(query_embedding, list):
+                logger.error("Invalid query embedding provided for vector search")
+                return []
+            
+            logger.info(f"Performing vector search with {len(query_embedding)}-dimensional embedding")
+            
             query_builder = (
                 self.client.query
                 .get("DropboxFile", [
@@ -286,7 +408,7 @@ class WeaviateService:
                 ])
                 .with_near_vector({
                     "vector": query_embedding,
-                    "distance": 0.8  # Adjust as needed
+                    "distance": 1.5  # Maximum distance threshold (more permissive for real searches)
                 })
                 .with_limit(limit)
                 .with_additional(["distance", "id"])
@@ -321,9 +443,15 @@ class WeaviateService:
             files = result.get("data", {}).get("Get", {}).get("DropboxFile", [])
             search_results = []
             
+            logger.info(f"Weaviate returned {len(files)} vector search results")
+            
             for file_data in files:
                 additional = file_data.get("_additional", {})
-                similarity_score = 1.0 - float(additional.get("distance", 0))  # Convert distance to similarity
+                distance = float(additional.get("distance", 1.0))  # Default to max distance
+                similarity_score = max(0.0, 1.0 - distance)  # Convert distance to similarity, ensure non-negative
+                
+                # Log similarity for debugging
+                logger.debug(f"File: {file_data.get('file_name', 'unknown')} - Distance: {distance:.3f}, Similarity: {similarity_score:.3f}")
                 
                 search_result = SearchResult(
                     id=additional.get("id", ""),
@@ -339,11 +467,12 @@ class WeaviateService:
                 )
                 search_results.append(search_result)
             
-            logger.info(f"Found {len(search_results)} similar files")
+            logger.info(f"Found {len(search_results)} similar files via vector search")
             return search_results
             
         except Exception as e:
             logger.error(f"Error searching similar files: {e}")
+            logger.error(f"Query embedding info - Type: {type(query_embedding)}, Length: {len(query_embedding) if query_embedding else 'None'}")
             return []
     
     def search_by_text(self, query_text: str, limit: int = 10) -> List[SearchResult]:

@@ -467,6 +467,18 @@ class DropboxService:
             logger.error(f"Error creating local file URL for {path}: {e}")
             return None
 
+    def get_local_file_path(self, path: str) -> Optional[str]:
+        """Download file and return the local file system path for direct file access"""
+        try:
+            local_path = self.download_file_to_temp(path)
+            if local_path and os.path.exists(local_path):
+                logger.info(f"Local file path for {path}: {local_path}")
+                return local_path
+            return None
+        except Exception as e:
+            logger.error(f"Error getting local file path for {path}: {e}")
+            return None
+
     def get_local_thumbnail(self, path: str, size: str = "medium", base_url: str = None) -> Optional[str]:
         """Get local thumbnail for an image file"""
         try:

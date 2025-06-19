@@ -636,32 +636,102 @@ async def get_cache_stats():
 
 @app.get("/api/debug/cache")
 async def debug_cache():
-    """Debug endpoint to check raw cache data"""
+    """Debug endpoint to inspect cache contents"""
     if not processing_service:
         raise HTTPException(status_code=503, detail="Processing service not initialized")
     
     try:
-        # Get raw cache stats
         cache_stats = processing_service.dropbox_service.cache.get_cache_stats()
         
-        # Get some sample files to check their file_type
-        sample_files = processing_service.dropbox_service.cache.get_files()[:10]
-        sample_data = []
-        for file in sample_files:
-            sample_data.append({
-                "name": file.name,
-                "file_type": file.file_type,
-                "extension": file.extension
-            })
+        # Get some sample files from cache
+        sample_files = processing_service.dropbox_service.cache.get_files()[:5]
         
         return {
             "cache_stats": cache_stats,
-            "sample_files": sample_data,
-            "total_sample_files": len(sample_files)
+            "sample_files": [
+                {
+                    "name": f.name,
+                    "path": f.path_display,
+                    "type": f.file_type,
+                    "size": f.size,
+                    "modified": f.modified.isoformat(),
+                    "content_hash": f.content_hash
+                } for f in sample_files
+            ],
+            "recommendations": {
+                "cache_health": "healthy" if cache_stats.get("total_files", 0) > 0 else "empty",
+                "next_steps": [
+                    "Cache looks good, ready for processing" if cache_stats.get("total_files", 0) > 0
+                    else "Run 'Sync Cache' to populate cache with Dropbox files"
+                ]
+            }
         }
     except Exception as e:
-        logger.error(f"Error getting debug cache data: {e}")
-        raise HTTPException(status_code=500, detail=f"Error: {e}")
+        logger.error(f"Error in debug cache: {e}")
+        raise HTTPException(status_code=500, detail=f"Error debugging cache: {e}")
+
+@app.get("/api/debug/vectors")
+async def debug_vectors():
+    """Debug endpoint to validate vector setup and configuration"""
+    if not processing_service:
+        raise HTTPException(status_code=503, detail="Processing service not initialized")
+    
+    try:
+        # Validate vector setup
+        vector_validation = processing_service.weaviate_service.validate_vector_setup()
+        
+        # Get sample vector data if available
+        sample_query_result = None
+        try:
+            sample_query = (
+                processing_service.weaviate_service.client.query
+                .get("DropboxFile", ["file_name", "file_type", "caption"])
+                .with_additional(["vector"])
+                .with_limit(2)
+                .do()
+            )
+            sample_files = sample_query.get("data", {}).get("Get", {}).get("DropboxFile", [])
+            sample_query_result = []
+            for file_data in sample_files:
+                vector_data = file_data.get("_additional", {}).get("vector", [])
+                sample_query_result.append({
+                    "file_name": file_data.get("file_name"),
+                    "file_type": file_data.get("file_type"), 
+                    "caption": file_data.get("caption", "")[:100] + "..." if file_data.get("caption", "") else None,
+                    "has_vector": bool(vector_data),
+                    "vector_dimensions": len(vector_data) if vector_data else 0,
+                    "vector_sample": vector_data[:5] if vector_data else None  # First 5 dimensions
+                })
+        except Exception as e:
+            sample_query_result = f"Error getting sample data: {str(e)}"
+        
+        # Test CLIP service
+        clip_test = None
+        try:
+            test_embedding = await processing_service.clip_service.get_text_embedding("test query")
+            clip_test = {
+                "working": bool(test_embedding),
+                "dimensions": len(test_embedding) if test_embedding else 0,
+                "sample": test_embedding[:5] if test_embedding else None
+            }
+        except Exception as e:
+            clip_test = {"working": False, "error": str(e)}
+        
+        return {
+            "vector_validation": vector_validation,
+            "sample_data": sample_query_result,
+            "clip_service": clip_test,
+            "summary": {
+                "vector_search_ready": vector_validation.get("valid", False) and vector_validation.get("has_sample_vectors", False),
+                "critical_issues": [
+                    issue for issue in vector_validation.get("issues", [])
+                ],
+                "next_steps": vector_validation.get("recommendations", [])
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error in debug vectors: {e}")
+        raise HTTPException(status_code=500, detail=f"Error debugging vectors: {e}")
 
 @app.delete("/api/cache/clear")
 async def clear_cache():
@@ -1026,7 +1096,7 @@ async def download_file_from_dropbox(file_id: str):
 
 @app.get("/api/debug/file/{file_id}")
 async def debug_file_by_id(file_id: str):
-    """Debug endpoint to test file retrieval from Weaviate"""
+    """Debug endpoint to test file retrieval from Weaviate with complete data including vectors"""
     try:
         # Validate UUID format
         import uuid
@@ -1041,30 +1111,239 @@ async def debug_file_by_id(file_id: str):
         if not processing_service.weaviate_service:
             return {"error": "Weaviate service not initialized"}
         
-        # Get file info from Weaviate using file ID
-        file_data = processing_service.weaviate_service.get_file_by_id(file_id)
+        # Query Weaviate directly with vector data
+        query = (
+            processing_service.weaviate_service.client.query
+            .get("DropboxFile", [
+                "dropbox_path", "file_name", "file_type", "file_extension", 
+                "file_size", "caption", "tags", "modified_date", "processed_date",
+                "content_hash", "public_url", "thumbnail_url"
+            ])
+            .with_additional(["id", "vector"])
+            .with_where({
+                "path": ["id"],
+                "operator": "Equal",
+                "valueText": file_id
+            })
+            .do()
+        )
         
-        if not file_data:
+        files = query.get("data", {}).get("Get", {}).get("DropboxFile", [])
+        
+        if not files:
             return {
                 "error": "File not found in Weaviate",
                 "file_id": file_id,
                 "weaviate_connected": processing_service.weaviate_service.client.is_ready()
             }
         
+        file_data = files[0]
+        additional = file_data.get("_additional", {})
+        vector_data = additional.get("vector", [])
+        
         return {
             "success": True,
             "file_id": file_id,
             "file_data": {
-                "dropbox_path": file_data.get("dropbox_path"),
-                "file_name": file_data.get("file_name"),
-                "file_type": file_data.get("file_type"),
-                "has_dropbox_path": bool(file_data.get("dropbox_path"))
+                "dropbox_path": file_data.get("dropbox_path", ""),
+                "file_name": file_data.get("file_name", ""),
+                "file_type": file_data.get("file_type", ""),
+                "file_extension": file_data.get("file_extension", ""),
+                "file_size": file_data.get("file_size", 0),
+                "caption": file_data.get("caption", ""),
+                "tags": file_data.get("tags", []),
+                "modified_date": file_data.get("modified_date", ""),
+                "processed_date": file_data.get("processed_date", ""),
+                "content_hash": file_data.get("content_hash", ""),
+                "public_url": file_data.get("public_url", ""),
+                "thumbnail_url": file_data.get("thumbnail_url", ""),
+                "has_vector": bool(vector_data and len(vector_data) > 0),
+                "vector_dimensions": len(vector_data) if vector_data else 0,
+                "vector_sample": vector_data[:10] if vector_data else [],
+                "vector_stats": {
+                    "min": min(vector_data) if vector_data else None,
+                    "max": max(vector_data) if vector_data else None,
+                    "mean": sum(vector_data) / len(vector_data) if vector_data else None
+                } if vector_data else None
             }
         }
         
     except Exception as e:
         logger.error(f"Debug file retrieval error: {e}", exc_info=True)
         return {"error": str(e), "file_id": file_id}
+
+@app.get("/data", response_class=HTMLResponse)
+async def data_viewer_page(request: Request):
+    """Data viewer page to see all Weaviate data in table format"""
+    return templates.TemplateResponse("data_viewer.html", {"request": request})
+
+@app.get("/api/data/all")
+async def get_all_data(page: int = 1, limit: int = 50):
+    """Get all data from Weaviate with pagination"""
+    try:
+        if not processing_service or not processing_service.weaviate_service:
+            raise HTTPException(status_code=503, detail="Weaviate service not available")
+        
+        # Calculate offset
+        offset = (page - 1) * limit
+        
+        # Query all files with pagination
+        query = (
+            processing_service.weaviate_service.client.query
+            .get("DropboxFile", [
+                "dropbox_path", "file_name", "file_type", "file_extension", 
+                "file_size", "caption", "tags", "modified_date", "processed_date",
+                "content_hash", "public_url", "thumbnail_url"
+            ])
+            .with_additional(["id", "vector"])
+            .with_limit(limit)
+            .with_offset(offset)
+            .do()
+        )
+        
+        files = query.get("data", {}).get("Get", {}).get("DropboxFile", [])
+        
+        # Get total count
+        total_query = (
+            processing_service.weaviate_service.client.query
+            .aggregate("DropboxFile")
+            .with_meta_count()
+            .do()
+        )
+        total_count = total_query.get("data", {}).get("Aggregate", {}).get("DropboxFile", [{}])[0].get("meta", {}).get("count", 0)
+        
+        # Format the data
+        formatted_files = []
+        for file_data in files:
+            additional = file_data.get("_additional", {})
+            vector_data = additional.get("vector", [])
+            
+            formatted_file = {
+                "id": additional.get("id", ""),
+                "dropbox_path": file_data.get("dropbox_path", ""),
+                "file_name": file_data.get("file_name", ""),
+                "file_type": file_data.get("file_type", ""),
+                "file_extension": file_data.get("file_extension", ""),
+                "file_size": file_data.get("file_size", 0),
+                "caption": file_data.get("caption", ""),
+                "tags": file_data.get("tags", []),
+                "modified_date": file_data.get("modified_date", ""),
+                "processed_date": file_data.get("processed_date", ""),
+                "content_hash": file_data.get("content_hash", ""),
+                "has_vector": bool(vector_data and len(vector_data) > 0),
+                "vector_dimensions": len(vector_data) if vector_data else 0,
+                "vector_sample": vector_data[:5] if vector_data else [],
+                "public_url": file_data.get("public_url", ""),
+                "thumbnail_url": file_data.get("thumbnail_url", "")
+            }
+            formatted_files.append(formatted_file)
+        
+        return {
+            "files": formatted_files,
+            "pagination": {
+                "page": page,
+                "limit": limit,
+                "total": total_count,
+                "total_pages": (total_count + limit - 1) // limit,
+                "has_next": offset + limit < total_count,
+                "has_prev": page > 1
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting all data: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/data/stats")
+async def get_data_stats():
+    """Get detailed statistics about the data"""
+    try:
+        if not processing_service or not processing_service.weaviate_service:
+            raise HTTPException(status_code=503, detail="Weaviate service not available")
+        
+        # Get total count
+        total_query = (
+            processing_service.weaviate_service.client.query
+            .aggregate("DropboxFile")
+            .with_meta_count()
+            .do()
+        )
+        total_count = total_query.get("data", {}).get("Aggregate", {}).get("DropboxFile", [{}])[0].get("meta", {}).get("count", 0)
+        
+        # Count files with vectors (sample approach for efficiency)
+        sample_size = min(1000, total_count)  # Sample up to 1000 files
+        vector_query = (
+            processing_service.weaviate_service.client.query
+            .get("DropboxFile", ["file_name"])
+            .with_additional(["vector"])
+            .with_limit(sample_size)
+            .do()
+        )
+        
+        files = vector_query.get("data", {}).get("Get", {}).get("DropboxFile", [])
+        files_with_vectors_sample = 0
+        vector_dimensions = 0
+        
+        for file_data in files:
+            vector_data = file_data.get("_additional", {}).get("vector", [])
+            if vector_data and len(vector_data) > 0:
+                files_with_vectors_sample += 1
+                if vector_dimensions == 0:
+                    vector_dimensions = len(vector_data)
+        
+        # Estimate total files with vectors based on sample
+        if len(files) > 0:
+            vector_ratio = files_with_vectors_sample / len(files)
+            files_with_vectors = int(total_count * vector_ratio)
+            files_without_vectors = total_count - files_with_vectors
+        else:
+            files_with_vectors = 0
+            files_without_vectors = total_count
+        
+        # Count by file type
+        image_query = (
+            processing_service.weaviate_service.client.query
+            .aggregate("DropboxFile")
+            .with_where({
+                "path": ["file_type"],
+                "operator": "Equal",
+                "valueText": "image"
+            })
+            .with_meta_count()
+            .do()
+        )
+        
+        video_query = (
+            processing_service.weaviate_service.client.query
+            .aggregate("DropboxFile")
+            .with_where({
+                "path": ["file_type"],
+                "operator": "Equal",
+                "valueText": "video"
+            })
+            .with_meta_count()
+            .do()
+        )
+        
+        image_count = image_query.get("data", {}).get("Aggregate", {}).get("DropboxFile", [{}])[0].get("meta", {}).get("count", 0)
+        video_count = video_query.get("data", {}).get("Aggregate", {}).get("DropboxFile", [{}])[0].get("meta", {}).get("count", 0)
+        
+        return {
+            "total_files": total_count,
+            "files_with_vectors": files_with_vectors,
+            "files_without_vectors": files_without_vectors,
+            "vector_dimensions": vector_dimensions,
+            "file_types": {
+                "images": image_count,
+                "videos": video_count,
+                "other": total_count - image_count - video_count
+            },
+            "vector_coverage": f"{(files_with_vectors/total_count*100):.1f}%" if total_count > 0 else "0%"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting data stats: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 # Background task functions
 

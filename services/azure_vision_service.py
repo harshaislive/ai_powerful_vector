@@ -2,6 +2,7 @@ import httpx
 import logging
 from typing import Optional, List, Dict, Any
 import asyncio
+import os
 
 from config import config
 
@@ -355,6 +356,152 @@ class AzureVisionService:
         except Exception as e:
             logger.error(f"Error extracting video tags: {e}")
             return ["video"]
+    
+    async def generate_caption_from_local_file(self, image_path: str) -> Optional[str]:
+        """
+        Generate caption for a local image file using Azure Computer Vision API
+        
+        Args:
+            image_path: Path to the local image file
+            
+        Returns:
+            Generated caption or None if failed
+        """
+        try:
+            if not os.path.exists(image_path):
+                logger.error(f"Image file not found: {image_path}")
+                return None
+            
+            logger.info(f"Generating caption for local image: {image_path}")
+            
+            # Azure Computer Vision API endpoint
+            url = f"{self.endpoint}/vision/v3.2/analyze"
+            
+            headers = {
+                "Ocp-Apim-Subscription-Key": self.api_key,
+                "Content-Type": "application/octet-stream"  # Binary data
+            }
+            
+            params = {
+                "visualFeatures": "Description"
+            }
+            
+            # Read image file as binary data
+            with open(image_path, 'rb') as image_file:
+                image_data = image_file.read()
+            
+            logger.info(f"Sending {len(image_data)} bytes to Azure Vision API")
+            
+            response = await self.client.post(url, headers=headers, params=params, content=image_data)
+            response.raise_for_status()
+            
+            result = response.json()
+            
+            # Extract the best caption
+            description = result.get("description", {})
+            captions = description.get("captions", [])
+            
+            if captions:
+                # Get the caption with highest confidence
+                best_caption = max(captions, key=lambda x: x.get("confidence", 0))
+                caption = best_caption.get("text", "")
+                confidence = best_caption.get("confidence", 0)
+                
+                logger.info(f"Generated caption from local file: {caption} (confidence: {confidence:.2f})")
+                return caption
+            else:
+                logger.warning("No captions returned from Azure Computer Vision for local file")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error generating caption for local file {image_path}: {e}")
+            return None
+    
+    async def analyze_local_image_full(self, image_path: str) -> Optional[Dict[str, Any]]:
+        """
+        Get full analysis of local image including captions, tags, and metadata
+        
+        Args:
+            image_path: Path to the local image file
+            
+        Returns:
+            Full analysis data or None if failed
+        """
+        try:
+            if not os.path.exists(image_path):
+                logger.error(f"Image file not found: {image_path}")
+                return None
+            
+            logger.info(f"Analyzing local image: {image_path}")
+            
+            url = f"{self.endpoint}/vision/v3.2/analyze"
+            
+            headers = {
+                "Ocp-Apim-Subscription-Key": self.api_key,
+                "Content-Type": "application/octet-stream"
+            }
+            
+            params = {
+                "visualFeatures": "Description,Tags,Categories"  # Get more features for local analysis
+            }
+            
+            # Read image file as binary data
+            with open(image_path, 'rb') as image_file:
+                image_data = image_file.read()
+            
+            response = await self.client.post(url, headers=headers, params=params, content=image_data)
+            response.raise_for_status()
+            
+            result = response.json()
+            logger.info(f"Full analysis completed for local image")
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error analyzing local image {image_path}: {e}")
+            return None
+    
+    async def generate_caption_with_tags_from_local(self, image_path: str) -> tuple[Optional[str], List[str]]:
+        """
+        Generate both caption and tags from local image in one call for efficiency
+        
+        Args:
+            image_path: Path to the local image file
+            
+        Returns:
+            Tuple of (caption, tags)
+        """
+        try:
+            analysis = await self.analyze_local_image_full(image_path)
+            if not analysis:
+                return None, []
+            
+            # Extract caption
+            description = analysis.get("description", {})
+            captions = description.get("captions", [])
+            
+            caption = None
+            if captions:
+                best_caption = max(captions, key=lambda x: x.get("confidence", 0))
+                caption = best_caption.get("text", "")
+            
+            # Extract tags from Azure API
+            azure_tags = analysis.get("tags", [])
+            # Azure tags come as objects with "name" and "confidence"
+            tags = [tag.get("name", "") for tag in azure_tags if tag.get("confidence", 0) > 0.5]
+            
+            # Also get description tags (these are usually more general)
+            description_tags = description.get("tags", [])
+            tags.extend(description_tags)
+            
+            # Remove duplicates and limit
+            tags = list(dict.fromkeys(tags))[:15]
+            
+            logger.info(f"Generated caption and tags from local file: {caption}, tags: {tags}")
+            return caption, tags
+            
+        except Exception as e:
+            logger.error(f"Error generating caption and tags from local file {image_path}: {e}")
+            return None, []
     
     async def close(self):
         """Close the HTTP client"""
