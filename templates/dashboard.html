@@ -230,6 +230,78 @@
     </div>
     {% endif %}
 
+    <!-- Pending Processing Alert (when cache has more files than processed) -->
+    {% if stats.local_cache and stats.local_cache.total_files > 0 and stats.weaviate.total_files > 0 and stats.local_cache.total_files > stats.weaviate.total_files %}
+    {% set pending_files = stats.local_cache.total_files - stats.weaviate.total_files %}
+    {% set pending_images = (stats.local_cache.by_type.image or 0) - (stats.weaviate.by_type.image or 0) %}
+    {% set pending_videos = (stats.local_cache.by_type.video or 0) - (stats.weaviate.by_type.video or 0) %}
+    <div class="row">
+        <div class="col-12">
+            <div class="alert alert-warning" role="alert">
+                <div class="row align-items-center">
+                    <div class="col-md-8">
+                        <h5 class="alert-heading">
+                            <i class="fas fa-clock"></i> Pending Files for Processing
+                        </h5>
+                        <p class="mb-2">
+                            You have <strong>{{ pending_files }} unprocessed files</strong> in cache that need AI analysis and vectorization.
+                            Process them to enable search functionality for all your files.
+                        </p>
+                        <div class="row mb-2">
+                            {% if pending_images > 0 %}
+                            <div class="col-md-6">
+                                <small class="text-muted">
+                                    <i class="fas fa-image text-success"></i> 
+                                    <strong>{{ pending_images }} pending images</strong> - 
+                                    Fast processing with Azure Computer Vision
+                                </small>
+                            </div>
+                            {% endif %}
+                            {% if pending_videos > 0 %}
+                            <div class="col-md-6">
+                                <small class="text-muted">
+                                    <i class="fas fa-video text-warning"></i> 
+                                    <strong>{{ pending_videos }} pending videos</strong> - 
+                                    Advanced frame analysis
+                                </small>
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                    <div class="col-md-4 text-end">
+                        <button class="btn btn-success btn-lg btn-action me-2" onclick="smartProcessFiles()">
+                            <i class="fas fa-magic"></i> Smart Process
+                            <small class="d-block">{{ pending_files }} files</small>
+                        </button>
+                        
+                        <div class="dropdown d-inline-block">
+                            <button class="btn btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown">
+                                <i class="fas fa-cog"></i> Process By Type
+                            </button>
+                            <ul class="dropdown-menu">
+                                {% if pending_images > 0 %}
+                                <li><a class="dropdown-item" href="#" onclick="initialProcessImages()">
+                                    <i class="fas fa-image text-success"></i> Images Only ({{ pending_images }})
+                                </a></li>
+                                {% endif %}
+                                {% if pending_videos > 0 %}
+                                <li><a class="dropdown-item" href="#" onclick="initialProcessVideos()">
+                                    <i class="fas fa-video text-warning"></i> Videos Only ({{ pending_videos }})
+                                </a></li>
+                                {% endif %}
+                                <li><hr class="dropdown-divider"></li>
+                                <li><a class="dropdown-item" href="#" onclick="processAllFiles()">
+                                    <i class="fas fa-sync text-info"></i> Process All Cached Files
+                                </a></li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
     <!-- Cache Management -->
     <div class="row">
         <div class="col-12">
