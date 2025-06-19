@@ -597,7 +597,7 @@ function createGridItem(result, index) {
                     <div class="result-title">${result.file_name}</div>
                     <div class="result-meta">
                         <span class="file-type-badge ${result.file_type}">${result.file_type.toUpperCase()}</span>
-                        <span class="similarity-score">${(result.similarity * 100).toFixed(1)}%</span>
+                        <span class="similarity-score">${(result.similarity_score * 100).toFixed(1)}%</span>
                     </div>
                 </div>
                 <div class="result-actions">
@@ -647,7 +647,7 @@ function createListItem(result) {
             ${result.caption ? `<p>${result.caption}</p>` : ''}
             <small class="text-muted">
                 ${result.dropbox_path} • ${new Date(result.modified_date).toLocaleDateString()} • 
-                ${(result.similarity * 100).toFixed(1)}% match
+                ${(result.similarity_score * 100).toFixed(1)}% match
             </small>
         </div>
     `;
