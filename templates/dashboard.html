@@ -469,6 +469,65 @@
 
 {% block extra_scripts %}
 <script>
+// Auto-refresh status every 3 seconds when processing is active
+let statusInterval = null;
+
+function startStatusPolling() {
+    if (statusInterval) clearInterval(statusInterval);
+    
+    statusInterval = setInterval(async () => {
+        try {
+            const response = await fetch('/api/status');
+            const status = await response.json();
+            
+            // Update status display
+            updateStatusDisplay(status);
+            
+            // Stop polling if processing is complete
+            if (status.status !== 'running') {
+                clearInterval(statusInterval);
+                statusInterval = null;
+                
+                // Refresh the page if processing completed
+                if (status.status === 'completed' || status.status === 'stopped') {
+                    setTimeout(() => location.reload(), 1000);
+                }
+            }
+        } catch (error) {
+            console.error('Error fetching status:', error);
+        }
+    }, 3000); // Poll every 3 seconds
+}
+
+function updateStatusDisplay(status) {
+    // Update progress bars
+    const progressElements = document.querySelectorAll('.progress-bar');
+    const progressPercentage = status.files_total > 0 ? (status.files_processed / status.files_total * 100) : 0;
+    
+    progressElements.forEach(element => {
+        element.style.width = progressPercentage + '%';
+        element.textContent = `${status.files_processed}/${status.files_total}`;
+    });
+    
+    // Update status text
+    const statusElements = document.querySelectorAll('.status-text');
+    statusElements.forEach(element => {
+        if (status.status === 'running') {
+            element.textContent = `Processing... ${status.files_processed}/${status.files_total} files`;
+            element.className = 'status-text text-warning';
+        } else if (status.status === 'completed') {
+            element.textContent = `Completed - ${status.files_processed} files processed`;
+            element.className = 'status-text text-success';
+        } else if (status.status === 'error') {
+            element.textContent = `Error: ${status.error || 'Unknown error'}`;
+            element.className = 'status-text text-danger';
+        } else {
+            element.textContent = `Status: ${status.status}`;
+            element.className = 'status-text text-info';
+        }
+    });
+}
+
 function smartProcessFiles() {
     if (confirm('Start smart processing? This will only process files that have changed since last sync.')) {
         fetch('/api/process/smart', {
@@ -480,11 +539,12 @@ function smartProcessFiles() {
         .then(response => response.json())
         .then(data => {
             if (data.warning) {
-                alert(`Smart processing started!\n\nNote: ${data.note}\n\nCheck the status above.`);
+                alert(`Smart processing started!\n\nNote: ${data.note}\n\nWatch the progress above.`);
             } else {
-                alert('Smart processing started! Check the status above.');
+                alert('Smart processing started! Watch the progress above.');
             }
-            location.reload();
+            // Start polling for status updates
+            startStatusPolling();
         })
         .catch(error => {
             console.error('Error:', error);
@@ -504,11 +564,12 @@ function processAllFiles() {
         .then(response => response.json())
         .then(data => {
             if (data.warning) {
-                alert(`Processing started!\n\nWarning: ${data.warning}\n\nCheck the status above.`);
+                alert(`Processing started!\n\nWarning: ${data.warning}\n\nWatch the progress above.`);
             } else {
-            alert('Processing started! Check the status above.');
+            alert('Processing started! Watch the progress above.');
             }
-            location.reload();
+            // Start polling for status updates
+            startStatusPolling();
         })
         .catch(error => {
             console.error('Error:', error);
@@ -528,11 +589,12 @@ function processNewFiles() {
         .then(response => response.json())
         .then(data => {
             if (data.deprecation_warning) {
-                alert(`Processing started!\n\nNote: ${data.deprecation_warning}\n\nCheck the status above.`);
+                alert(`Processing started!\n\nNote: ${data.deprecation_warning}\n\nWatch the progress above.`);
             } else {
-            alert('Processing started! Check the status above.');
+            alert('Processing started! Watch the progress above.');
             }
-            location.reload();
+            // Start polling for status updates
+            startStatusPolling();
         })
         .catch(error => {
             console.error('Error:', error);
@@ -552,6 +614,8 @@ function pauseProcessing() {
         .then(response => response.json())
         .then(data => {
             alert('Processing paused.');
+            clearInterval(statusInterval);
+            statusInterval = null;
             location.reload();
         })
         .catch(error => {
@@ -571,7 +635,7 @@ function resumeProcessing() {
     .then(response => response.json())
     .then(data => {
         alert('Processing resumed.');
-        location.reload();
+        startStatusPolling();
     })
     .catch(error => {
         console.error('Error:', error);
@@ -590,6 +654,8 @@ function stopProcessing() {
         .then(response => response.json())
         .then(data => {
             alert('Processing stopped.');
+            clearInterval(statusInterval);
+            statusInterval = null;
             location.reload();
         })
         .catch(error => {
@@ -679,7 +745,7 @@ function clearCache() {
 }
 
 function initialProcessFiles() {
-    if (confirm('🚀 Start initial processing of all cached files?\n\nThis will:\n• Process ALL files in your cache\n• Generate BLIP captions for images/videos\n• Create CLIP embeddings for search\n• Store everything in Weaviate\n\nThis may take a while depending on your file count.\n\nContinue?')) {
+    if (confirm('🚀 Start initial processing of all cached files?\n\nThis will:\n• Process ALL files in your cache\n• Generate BLIP captions for images/videos\n• Create CLIP embeddings for search\n• Store everything in Weaviate\n\nThis may take a very long time!\n\nContinue?')) {
         fetch('/api/process/initial', {
             method: 'POST',
             headers: {
@@ -688,8 +754,9 @@ function initialProcessFiles() {
         })
         .then(response => response.json())
         .then(data => {
-            alert(`Initial processing started!\n\n${data.note}\n\nEstimated time: ${data.estimated_time}\n\nCheck the status above for progress.`);
-            location.reload();
+            alert(`Initial processing started!\n\n${data.note}\n\nWatch the progress above.`);
+            // Start polling for status updates
+            startStatusPolling();
         })
         .catch(error => {
             console.error('Error:', error);
@@ -708,8 +775,9 @@ function initialProcessImages() {
         })
         .then(response => response.json())
         .then(data => {
-            alert(`Image processing started!\n\n${data.note}\n\nEstimated time: ${data.estimated_time}\n\nCheck the status above for progress.`);
-            location.reload();
+            alert(`Image processing started!\n\n${data.note}\n\nWatch the progress above.`);
+            // Start polling for status updates
+            startStatusPolling();
         })
         .catch(error => {
             console.error('Error:', error);
@@ -728,8 +796,9 @@ function initialProcessVideos() {
         })
         .then(response => response.json())
         .then(data => {
-            alert(`Video processing started!\n\n${data.note}\n\nEstimated time: ${data.estimated_time}\n\nCheck the status above for progress.`);
-            location.reload();
+            alert(`Video processing started!\n\n${data.note}\n\nWatch the progress above.`);
+            // Start polling for status updates
+            startStatusPolling();
         })
         .catch(error => {
             console.error('Error:', error);
@@ -746,11 +815,43 @@ function quickSearch(event) {
     }
 }
 
-// Auto-refresh status if processing is running or paused
-{% if status.status == "running" or status.status == "paused" %}
-setTimeout(() => {
-    location.reload();
-}, 10000); // Refresh every 10 seconds
-{% endif %}
+// Check if processing is active on page load
+document.addEventListener('DOMContentLoaded', async function() {
+    try {
+        const response = await fetch('/api/status');
+        const status = await response.json();
+        
+        if (status.status === 'running') {
+            console.log('Processing is active, starting status polling...');
+            startStatusPolling();
+        }
+    } catch (error) {
+        console.error('Error checking initial status:', error);
+    }
+});
 </script>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+.status-text {
+    font-weight: 500;
+    margin: 0;
+    padding: 5px 0;
+}
+
+.progress-container {
+    margin: 10px 0;
+}
+
+.processing-indicator {
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0% { opacity: 1; }
+    50% { opacity: 0.5; }
+    100% { opacity: 1; }
+}
+</style>
 {% endblock %} 

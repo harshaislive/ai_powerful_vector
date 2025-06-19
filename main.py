@@ -358,17 +358,36 @@ async def serve_file(filename: str):
 async def get_image_from_dropbox(file_id: str):
     """Get image directly from Dropbox using file ID from Weaviate"""
     try:
+        # Validate UUID format
+        import uuid
+        try:
+            uuid.UUID(file_id)
+        except ValueError:
+            logger.error(f"Invalid UUID format: {file_id}")
+            raise HTTPException(status_code=400, detail="Invalid file ID format")
+        
         if not processing_service:
+            logger.error("Processing service not initialized")
             raise HTTPException(status_code=503, detail="Processing service not initialized")
+        
+        if not processing_service.weaviate_service:
+            logger.error("Weaviate service not initialized")
+            raise HTTPException(status_code=503, detail="Weaviate service not initialized")
+        
+        logger.info(f"Getting image for file ID: {file_id}")
         
         # Get file info from Weaviate using file ID
         file_data = processing_service.weaviate_service.get_file_by_id(file_id)
         if not file_data:
+            logger.error(f"File not found in Weaviate: {file_id}")
             raise HTTPException(status_code=404, detail="File not found in database")
         
         dropbox_path = file_data.get("dropbox_path")
         if not dropbox_path:
+            logger.error(f"No dropbox_path found for file: {file_id}")
             raise HTTPException(status_code=404, detail="File path not found")
+        
+        logger.info(f"Downloading file from Dropbox: {dropbox_path}")
         
         # Download file content directly from Dropbox
         try:
@@ -385,6 +404,8 @@ async def get_image_from_dropbox(file_id: str):
             elif dropbox_path.lower().endswith(('.bmp',)):
                 content_type = "image/bmp"
             
+            logger.info(f"Successfully downloaded file: {dropbox_path}, size: {len(response.content)} bytes")
+            
             return Response(
                 content=response.content,
                 media_type=content_type,
@@ -397,30 +418,52 @@ async def get_image_from_dropbox(file_id: str):
         except dropbox.exceptions.ApiError as e:
             logger.error(f"Dropbox API error for {dropbox_path}: {e}")
             raise HTTPException(status_code=404, detail="File not found in Dropbox")
+        except Exception as e:
+            logger.error(f"Unexpected error downloading {dropbox_path}: {e}")
+            raise HTTPException(status_code=500, detail=f"Error downloading file: {str(e)}")
             
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error serving image {file_id}: {e}")
+        logger.error(f"Error serving image {file_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/thumbnail/{file_id}")
 async def get_thumbnail_from_dropbox(file_id: str, size: str = "medium"):
     """Get thumbnail directly from Dropbox using file ID from Weaviate"""
     try:
+        # Validate UUID format
+        import uuid
+        try:
+            uuid.UUID(file_id)
+        except ValueError:
+            logger.error(f"Invalid UUID format: {file_id}")
+            raise HTTPException(status_code=400, detail="Invalid file ID format")
+        
         if not processing_service:
+            logger.error("Processing service not initialized")
             raise HTTPException(status_code=503, detail="Processing service not initialized")
+        
+        if not processing_service.weaviate_service:
+            logger.error("Weaviate service not initialized")
+            raise HTTPException(status_code=503, detail="Weaviate service not initialized")
+        
+        logger.info(f"Getting thumbnail for file ID: {file_id}, size: {size}")
         
         # Get file info from Weaviate using file ID
         file_data = processing_service.weaviate_service.get_file_by_id(file_id)
         if not file_data:
+            logger.error(f"File not found in Weaviate: {file_id}")
             raise HTTPException(status_code=404, detail="File not found in database")
         
         dropbox_path = file_data.get("dropbox_path")
         file_type = file_data.get("file_type", "")
         
         if not dropbox_path:
+            logger.error(f"No dropbox_path found for file: {file_id}")
             raise HTTPException(status_code=404, detail="File path not found")
+        
+        logger.info(f"Getting thumbnail for: {dropbox_path}, type: {file_type}")
         
         # For videos, try to get thumbnail or return placeholder
         if file_type == "video":
@@ -431,15 +474,16 @@ async def get_thumbnail_from_dropbox(file_id: str, size: str = "medium"):
                     format=dropbox.files.ThumbnailFormat.jpeg,
                     size=dropbox.files.ThumbnailSize.w640h480
                 )
+                logger.info(f"Successfully got video thumbnail: {dropbox_path}")
                 return Response(
                     content=thumbnail_content,
                     media_type="image/jpeg",
                     headers={"Cache-Control": "public, max-age=3600"}
                 )
-            except:
-                # Video thumbnail not available, return placeholder or full video thumbnail
-                logger.info(f"No thumbnail available for video {dropbox_path}")
-                raise HTTPException(status_code=404, detail="Video thumbnail not available")
+            except Exception as e:
+                # Video thumbnail not available, fall back to full image endpoint
+                logger.warning(f"No thumbnail available for video {dropbox_path}: {e}")
+                return await get_image_from_dropbox(file_id)
         
         # For images, get thumbnail from Dropbox
         try:
@@ -459,6 +503,8 @@ async def get_thumbnail_from_dropbox(file_id: str, size: str = "medium"):
                 size=thumbnail_size
             )
             
+            logger.info(f"Successfully got thumbnail: {dropbox_path}, size: {len(thumbnail_content)} bytes")
+            
             return Response(
                 content=thumbnail_content,
                 media_type="image/jpeg",
@@ -469,14 +515,18 @@ async def get_thumbnail_from_dropbox(file_id: str, size: str = "medium"):
             )
             
         except dropbox.exceptions.ApiError as e:
-            logger.warning(f"Thumbnail not available for {dropbox_path}, falling back to full image")
+            logger.warning(f"Thumbnail not available for {dropbox_path}: {e}, falling back to full image")
+            # Fallback to full image if thumbnail fails
+            return await get_image_from_dropbox(file_id)
+        except Exception as e:
+            logger.error(f"Error getting thumbnail for {dropbox_path}: {e}")
             # Fallback to full image if thumbnail fails
             return await get_image_from_dropbox(file_id)
             
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error serving thumbnail {file_id}: {e}")
+        logger.error(f"Error serving thumbnail {file_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/file/{file_id}")
@@ -973,6 +1023,48 @@ async def download_file_from_dropbox(file_id: str):
     except Exception as e:
         logger.error(f"Error downloading file {file_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/debug/file/{file_id}")
+async def debug_file_by_id(file_id: str):
+    """Debug endpoint to test file retrieval from Weaviate"""
+    try:
+        # Validate UUID format
+        import uuid
+        try:
+            uuid.UUID(file_id)
+        except ValueError:
+            return {"error": "Invalid UUID format", "file_id": file_id}
+        
+        if not processing_service:
+            return {"error": "Processing service not initialized"}
+        
+        if not processing_service.weaviate_service:
+            return {"error": "Weaviate service not initialized"}
+        
+        # Get file info from Weaviate using file ID
+        file_data = processing_service.weaviate_service.get_file_by_id(file_id)
+        
+        if not file_data:
+            return {
+                "error": "File not found in Weaviate",
+                "file_id": file_id,
+                "weaviate_connected": processing_service.weaviate_service.client.is_ready()
+            }
+        
+        return {
+            "success": True,
+            "file_id": file_id,
+            "file_data": {
+                "dropbox_path": file_data.get("dropbox_path"),
+                "file_name": file_data.get("file_name"),
+                "file_type": file_data.get("file_type"),
+                "has_dropbox_path": bool(file_data.get("dropbox_path"))
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Debug file retrieval error: {e}", exc_info=True)
+        return {"error": str(e), "file_id": file_id}
 
 # Background task functions
 
