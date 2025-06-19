@@ -351,11 +351,11 @@ class ProcessingService:
                 else:
                     logger.info(f"File {dropbox_file.name} has changed, reprocessing...")
             
-            # Get Dropbox shared link for public viewing
+            # Get Dropbox shared link for public viewing (optional)
             public_url = self.dropbox_service.create_shared_link(dropbox_file.path_display)
             if not public_url:
-                logger.error(f"Could not create shared link for: {dropbox_file.name}")
-                return None
+                logger.warning(f"Could not create shared link for: {dropbox_file.name} - continuing without public URL")
+                public_url = None  # Continue processing without public URL
             
             # Get local file for processing (AI analysis needs local access)
             local_processing_url = self.dropbox_service.get_local_file_url(dropbox_file.path_display)
