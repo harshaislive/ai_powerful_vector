@@ -44,7 +44,7 @@ class Config:
     )
     
     # Processing Configuration
-    BATCH_SIZE = int(os.getenv("BATCH_SIZE", 10))
+    BATCH_SIZE = int(os.getenv("BATCH_SIZE", 25))  # Increased from 10 to 25 for better speed
     
     # Optimization Configuration
     USE_THUMBNAILS = os.getenv("USE_THUMBNAILS", "true").lower() == "true"
@@ -66,5 +66,10 @@ class Config:
     # Cron job settings
     CRON_HOUR = int(os.getenv("CRON_HOUR", 22))  # 10 PM
     CRON_MINUTE = int(os.getenv("CRON_MINUTE", 0))
+    
+    # Performance Optimization
+    SKIP_SHARED_LINKS = os.getenv("SKIP_SHARED_LINKS", "true").lower() == "true"  # Skip Dropbox permission issues
+    MAX_CONCURRENT_API_CALLS = int(os.getenv("MAX_CONCURRENT_API_CALLS", 25))  # Limit concurrent API calls
+    ENABLE_FAST_MODE = os.getenv("ENABLE_FAST_MODE", "true").lower() == "true"  # Skip unnecessary operations
 
 config = Config() 
