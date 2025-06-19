@@ -90,9 +90,10 @@ class ProcessingService:
                         break
                         
                     batch = dropbox_files[i:i + batch_size]
-                    await self._process_batch(batch)
+                    batch_processed = await self._process_batch(batch)
                     
-                    self.current_status.files_processed += len(batch)
+                    # Only count actually processed files (not skipped ones)
+                    self.current_status.files_processed += batch_processed
                     logger.info(f"Smart processing progress: {self.current_status.files_processed}/{self.current_status.files_total}")
                 
                 # Mark as completed if not stopped
@@ -104,7 +105,7 @@ class ProcessingService:
                 return self.current_status
                 
             except Exception as e:
-                logger.error(f"Error in smart processing: {e}")
+                logger.error(f"Error in smart processing: {e}", exc_info=True)
                 self.current_status.status = "failed"
                 self.current_status.errors.append(f"Smart processing failed: {str(e)}")
                 self.current_status.end_time = datetime.now()
@@ -317,20 +318,27 @@ class ProcessingService:
                 self.current_status.errors.append(str(e))
                 return self.current_status
     
-    async def _process_batch(self, files: List[DropboxFile]):
-        """Process a batch of files"""
+    async def _process_batch(self, files: List[DropboxFile]) -> int:
+        """Process a batch of files and return count of successfully processed files"""
         tasks = [self._process_single_file(file) for file in files]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         
+        processed_count = 0
         for i, result in enumerate(results):
             if isinstance(result, Exception):
                 error_msg = f"Error processing {files[i].name}: {result}"
                 logger.error(error_msg)
                 self.current_status.errors.append(error_msg)
+                # Don't count failed files
+            elif result is not None:
+                # File was successfully processed (not skipped)
+                processed_count += 1
             else:
-                self.current_status.files_processed += 1
+                # File was skipped (duplicate, etc.) - don't count
+                logger.debug(f"File {files[i].name} was skipped")
                 
-        logger.info(f"Batch completed. Progress: {self.current_status.files_processed}/{self.current_status.files_total}")
+        logger.info(f"Batch completed. Processed {processed_count}/{len(files)} files in batch")
+        return processed_count
     
     async def _process_single_file(self, dropbox_file: DropboxFile) -> Optional[ProcessedFile]:
         """Process a single file"""
@@ -403,15 +411,27 @@ class ProcessingService:
                         # Use Azure Vision service with enhanced functionality
                         caption, azure_tags = await self.azure_vision_service.generate_caption_with_tags(processing_url)
                         tags = azure_tags  # Azure already provides good tags
-                        logger.info(f"Azure Vision - Caption: {caption}, Tags: {tags}")
+                        logger.info(f"Azure Vision - Caption generated for {dropbox_file.name}")
                     except Exception as e:
-                        logger.warning(f"Azure Vision failed: {e}. Falling back to Replicate")
-                        caption = await self.replicate_service.generate_caption_async(processing_url)
-                        tags = self.replicate_service.extract_tags_from_caption(caption) if caption else []
+                        logger.warning(f"Azure Vision failed for {dropbox_file.name}: {e}. Falling back to Replicate")
+                        try:
+                            caption = await self.replicate_service.generate_caption_async(processing_url)
+                            tags = self.replicate_service.extract_tags_from_caption(caption) if caption else []
+                            logger.info(f"Replicate fallback successful for {dropbox_file.name}")
+                        except Exception as e2:
+                            logger.error(f"Both Azure and Replicate failed for {dropbox_file.name}: {e2}")
+                            caption = f"Image: {dropbox_file.name}"
+                            tags = ["image"]
                 else:
                     # Fallback to Replicate service
-                    caption = await self.replicate_service.generate_caption_async(processing_url)
-                    tags = self.replicate_service.extract_tags_from_caption(caption) if caption else []
+                    try:
+                        caption = await self.replicate_service.generate_caption_async(processing_url)
+                        tags = self.replicate_service.extract_tags_from_caption(caption) if caption else []
+                        logger.info(f"Replicate caption generated for {dropbox_file.name}")
+                    except Exception as e:
+                        logger.error(f"Replicate failed for {dropbox_file.name}: {e}")
+                        caption = f"Image: {dropbox_file.name}"
+                        tags = ["image"]
             elif dropbox_file.file_type == "video":
                 # Advanced video processing with frame extraction
                 logger.info(f"Starting advanced video analysis for: {dropbox_file.name}")
@@ -537,7 +557,11 @@ class ProcessingService:
                 return None
                 
         except Exception as e:
-            logger.error(f"Error processing file {dropbox_file.name}: {e}")
+            logger.error(f"Error processing file {dropbox_file.name}: {e}", exc_info=True)
+            # Add the error to the status for tracking
+            if hasattr(self, 'current_status') and self.current_status:
+                error_msg = f"Error processing {dropbox_file.name}: {str(e)}"
+                self.current_status.errors.append(error_msg)
             return None
     
     async def search_files(self, query: str, limit: int = 10, file_types: Optional[List[str]] = None) -> List[Dict[str, Any]]:

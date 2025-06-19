@@ -1089,45 +1089,87 @@ async def sync_cache_background():
 async def smart_process_background():
     """Background task for smart incremental processing"""
     try:
+        logger.info("Starting smart processing background task")
         await processing_service.smart_process()
+        logger.info("Smart processing background task completed")
     except Exception as e:
-        logger.error(f"Error in smart processing background task: {e}")
+        logger.error(f"Error in smart processing background task: {e}", exc_info=True)
+        # Ensure status is updated on error
+        if processing_service:
+            processing_service.current_status.status = "failed"
+            processing_service.current_status.end_time = datetime.now()
+            processing_service.current_status.errors.append(f"Background task error: {str(e)}")
 
 async def process_all_background():
     """Background task for full processing"""
     try:
+        logger.info("Starting process all background task")
         await processing_service.process_all_files()
+        logger.info("Process all background task completed")
     except Exception as e:
-        logger.error(f"Error in processing background task: {e}")
+        logger.error(f"Error in processing background task: {e}", exc_info=True)
+        # Ensure status is updated on error
+        if processing_service:
+            processing_service.current_status.status = "failed"
+            processing_service.current_status.end_time = datetime.now()
+            processing_service.current_status.errors.append(f"Background task error: {str(e)}")
 
 async def process_new_background(hours_back: int):
     """Background task for processing new files"""
     try:
+        logger.info(f"Starting process new files background task (last {hours_back} hours)")
         yesterday = datetime.now() - timedelta(hours=hours_back)
         await processing_service.process_new_files(yesterday)
+        logger.info("Process new files background task completed")
     except Exception as e:
-        logger.error(f"Error in new file processing background task: {e}")
+        logger.error(f"Error in new file processing background task: {e}", exc_info=True)
+        # Ensure status is updated on error
+        if processing_service:
+            processing_service.current_status.status = "failed"
+            processing_service.current_status.end_time = datetime.now()
+            processing_service.current_status.errors.append(f"Background task error: {str(e)}")
 
 async def initial_process_background():
     """Background task for initial processing of all cached files"""
     try:
+        logger.info("Starting initial processing background task")
         await processing_service.process_all_files()
+        logger.info("Initial processing background task completed")
     except Exception as e:
-        logger.error(f"Error in initial processing background task: {e}")
+        logger.error(f"Error in initial processing background task: {e}", exc_info=True)
+        # Ensure status is updated on error
+        if processing_service:
+            processing_service.current_status.status = "failed"
+            processing_service.current_status.end_time = datetime.now()
+            processing_service.current_status.errors.append(f"Background task error: {str(e)}")
 
 async def initial_process_images_background():
     """Background task for initial processing of cached images only"""
     try:
+        logger.info("Starting initial image processing background task")
         await processing_service.process_images_only()
+        logger.info("Initial image processing background task completed")
     except Exception as e:
-        logger.error(f"Error in initial image processing background task: {e}")
+        logger.error(f"Error in initial image processing background task: {e}", exc_info=True)
+        # Ensure status is updated on error
+        if processing_service:
+            processing_service.current_status.status = "failed"
+            processing_service.current_status.end_time = datetime.now()
+            processing_service.current_status.errors.append(f"Background task error: {str(e)}")
 
 async def initial_process_videos_background():
     """Background task for initial processing of cached videos only"""
     try:
+        logger.info("Starting initial video processing background task")
         await processing_service.process_videos_only()
+        logger.info("Initial video processing background task completed")
     except Exception as e:
-        logger.error(f"Error in initial video processing background task: {e}")
+        logger.error(f"Error in initial video processing background task: {e}", exc_info=True)
+        # Ensure status is updated on error
+        if processing_service:
+            processing_service.current_status.status = "failed"
+            processing_service.current_status.end_time = datetime.now()
+            processing_service.current_status.errors.append(f"Background task error: {str(e)}")
 
 # Error handlers
 
