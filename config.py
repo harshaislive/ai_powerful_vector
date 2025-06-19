@@ -12,6 +12,10 @@ class Config:
     # Replicate Configuration
     REPLICATE_API_TOKEN = os.getenv("REPLICATE_API_TOKEN")
     
+    # Azure Computer Vision Configuration  
+    AZURE_VISION_ENDPOINT = os.getenv("AZURE_VISION_ENDPOINT", "https://imagevisionharsha.cognitiveservices.azure.com")
+    AZURE_VISION_API_KEY = os.getenv("AZURE_VISION_API_KEY")
+    
     # CLIP Service Configuration
     CLIP_SERVICE_URL = os.getenv("CLIP_SERVICE_URL", "https://your-clip-service.railway.app")
     

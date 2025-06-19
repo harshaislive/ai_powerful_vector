@@ -8,6 +8,7 @@ import os
 from models import DropboxFile, ProcessedFile, ProcessingStatus
 from services.dropbox_service import DropboxService
 from services.replicate_service import ReplicateService
+from services.azure_vision_service import AzureVisionService
 from services.clip_service import ClipService
 from services.weaviate_service import WeaviateService
 from services.video_service import VideoService
@@ -19,6 +20,16 @@ class ProcessingService:
     def __init__(self):
         self.dropbox_service = DropboxService()
         self.replicate_service = ReplicateService()
+        # Try to initialize Azure Vision service, fallback to Replicate if not available
+        try:
+            self.azure_vision_service = AzureVisionService()
+            self.use_azure_vision = True
+            logger.info("Using Azure Computer Vision for image captioning")
+        except Exception as e:
+            logger.warning(f"Azure Vision service not available: {e}. Falling back to Replicate service")
+            self.azure_vision_service = None
+            self.use_azure_vision = False
+        
         self.clip_service = ClipService()
         self.weaviate_service = WeaviateService()
         self.video_service = VideoService()
@@ -386,11 +397,21 @@ class ProcessingService:
             tags = []
             
             if dropbox_file.file_type == "image":
-                # Generate caption using Replicate with optimized image
-                caption = await self.replicate_service.generate_caption_async(processing_url)
-                if caption:
-                    # Extract tags from caption
-                    tags = self.replicate_service.extract_tags_from_caption(caption)
+                # Generate caption using Azure Computer Vision or Replicate as fallback
+                if self.use_azure_vision and self.azure_vision_service:
+                    try:
+                        # Use Azure Vision service with enhanced functionality
+                        caption, azure_tags = await self.azure_vision_service.generate_caption_with_tags(processing_url)
+                        tags = azure_tags  # Azure already provides good tags
+                        logger.info(f"Azure Vision - Caption: {caption}, Tags: {tags}")
+                    except Exception as e:
+                        logger.warning(f"Azure Vision failed: {e}. Falling back to Replicate")
+                        caption = await self.replicate_service.generate_caption_async(processing_url)
+                        tags = self.replicate_service.extract_tags_from_caption(caption) if caption else []
+                else:
+                    # Fallback to Replicate service
+                    caption = await self.replicate_service.generate_caption_async(processing_url)
+                    tags = self.replicate_service.extract_tags_from_caption(caption) if caption else []
             elif dropbox_file.file_type == "video":
                 # Advanced video processing with frame extraction
                 logger.info(f"Starting advanced video analysis for: {dropbox_file.name}")
@@ -400,21 +421,54 @@ class ProcessingService:
                 
                 if extracted_frames:
                     # Analyze extracted frames to generate comprehensive caption
-                    caption = await self.replicate_service.analyze_video_frames(extracted_frames)
-                    
-                    # Extract tags from video analysis
-                    frame_captions = []
-                    for frame_path in extracted_frames:
+                    if self.use_azure_vision and self.azure_vision_service:
                         try:
-                            frame_filename = os.path.basename(frame_path)
-                            frame_url = f"{config.SERVER_URL}/files/{frame_filename}"
-                            frame_caption = await self.replicate_service.generate_caption_async(frame_url)
-                            if frame_caption:
-                                frame_captions.append(frame_caption)
-                        except:
-                            continue
-                    
-                    tags = self.replicate_service.extract_video_tags(caption, frame_captions)
+                            # Use Azure Vision for video frame analysis
+                            caption = await self.azure_vision_service.analyze_video_frames(extracted_frames)
+                            
+                            # Extract tags from video analysis using Azure Vision
+                            frame_captions = []
+                            for frame_path in extracted_frames:
+                                try:
+                                    frame_filename = os.path.basename(frame_path)
+                                    frame_url = f"{config.SERVER_URL}/files/{frame_filename}"
+                                    frame_caption = await self.azure_vision_service.generate_caption_async(frame_url)
+                                    if frame_caption:
+                                        frame_captions.append(frame_caption)
+                                except:
+                                    continue
+                            
+                            tags = self.azure_vision_service.extract_video_tags(caption, frame_captions)
+                            logger.info(f"Azure Vision video analysis - Caption: {caption}, Tags: {tags}")
+                        except Exception as e:
+                            logger.warning(f"Azure Vision video analysis failed: {e}. Falling back to Replicate")
+                            # Fallback to Replicate
+                            caption = await self.replicate_service.analyze_video_frames(extracted_frames)
+                            frame_captions = []
+                            for frame_path in extracted_frames:
+                                try:
+                                    frame_filename = os.path.basename(frame_path)
+                                    frame_url = f"{config.SERVER_URL}/files/{frame_filename}"
+                                    frame_caption = await self.replicate_service.generate_caption_async(frame_url)
+                                    if frame_caption:
+                                        frame_captions.append(frame_caption)
+                                except:
+                                    continue
+                            tags = self.replicate_service.extract_video_tags(caption, frame_captions)
+                    else:
+                        # Use Replicate service as fallback
+                        caption = await self.replicate_service.analyze_video_frames(extracted_frames)
+                        frame_captions = []
+                        for frame_path in extracted_frames:
+                            try:
+                                frame_filename = os.path.basename(frame_path)
+                                frame_url = f"{config.SERVER_URL}/files/{frame_filename}"
+                                frame_caption = await self.replicate_service.generate_caption_async(frame_url)
+                                if frame_caption:
+                                    frame_captions.append(frame_caption)
+                            except:
+                                continue
+                        tags = self.replicate_service.extract_video_tags(caption, frame_captions)
                     
                     # Clean up extracted frames after analysis
                     self.video_service.cleanup_frames(extracted_frames)
@@ -652,6 +706,8 @@ class ProcessingService:
         """Cleanup resources"""
         try:
             await self.clip_service.close()
+            if hasattr(self, 'azure_vision_service') and self.azure_vision_service:
+                await self.azure_vision_service.close()
             logger.info("Processing service cleanup completed")
         except Exception as e:
             logger.error(f"Error during cleanup: {e}") 

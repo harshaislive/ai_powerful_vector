@@ -5,9 +5,9 @@ A powerful AI-driven search engine for your Dropbox images and videos using CLIP
 ## Features
 
 - 🔍 **AI-Powered Search**: Search through images and videos using natural language
-- 🖼️ **Image Analysis**: Automatic caption generation using BLIP model
+- 🖼️ **Image Analysis**: Advanced caption generation using Azure Computer Vision (with BLIP fallback)
 - 🧠 **Vector Embeddings**: CLIP embeddings for semantic similarity search
-- 📊 **Rich Metadata**: Extract tags, file information, and metadata
+- 📊 **Rich Metadata**: Extract tags, file information, and metadata with confidence scores
 - ⏰ **Automated Processing**: Daily cron jobs to process new files
 - 🌐 **Web Interface**: Beautiful dashboard and search interface
 - 🚀 **Scalable**: Designed for deployment on Railway/Docker
@@ -43,11 +43,13 @@ A powerful AI-driven search engine for your Dropbox images and videos using CLIP
    - Client Secret
    - Refresh Token
 
-2. **Replicate API**: Get your API token from [Replicate](https://replicate.com)
+2. **Azure Computer Vision API**: Get your API key from [Azure Portal](https://portal.azure.com) (Primary)
 
-3. **CLIP Service**: Deploy your CLIP service on Railway (or use existing one)
+3. **Replicate API**: Get your API token from [Replicate](https://replicate.com) (Fallback)
 
-4. **Weaviate**: Deploy Weaviate on Railway (or use existing instance)
+4. **CLIP Service**: Deploy your CLIP service on Railway (or use existing one)
+
+5. **Weaviate**: Deploy Weaviate on Railway (or use existing instance)
 
 ### Installation
 
@@ -85,7 +87,11 @@ DROPBOX_CLIENT_ID=your_dropbox_client_id
 DROPBOX_CLIENT_SECRET=your_dropbox_client_secret
 DROPBOX_REFRESH_TOKEN=your_dropbox_refresh_token
 
-# Replicate Configuration
+# Azure Computer Vision Configuration (Primary)
+AZURE_VISION_ENDPOINT=https://imagevisionharsha.cognitiveservices.azure.com
+AZURE_VISION_API_KEY=your_azure_vision_api_key
+
+# Replicate Configuration (Fallback)
 REPLICATE_API_TOKEN=r8_your_replicate_api_token
 
 # CLIP Service Configuration
