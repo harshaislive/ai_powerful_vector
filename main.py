@@ -1,5 +1,5 @@
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, FileResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, FileResponse, Response
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 from typing import Optional, List
 import os
 import sys
+import dropbox
 
 # Add the current directory to Python path so we can import our modules
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -360,31 +361,47 @@ async def get_image_from_dropbox(file_id: str):
         if not processing_service:
             raise HTTPException(status_code=503, detail="Processing service not initialized")
         
-        # Get file info from Weaviate using the file ID
+        # Get file info from Weaviate using file ID
         file_data = processing_service.weaviate_service.get_file_by_id(file_id)
         if not file_data:
             raise HTTPException(status_code=404, detail="File not found in database")
         
-        # Get the Dropbox path
         dropbox_path = file_data.get("dropbox_path")
         if not dropbox_path:
-            raise HTTPException(status_code=404, detail="Dropbox path not found")
+            raise HTTPException(status_code=404, detail="File path not found")
         
-        # Create fresh Dropbox shared link
-        shared_link = processing_service.dropbox_service.create_shared_link(dropbox_path)
-        if not shared_link:
-            raise HTTPException(status_code=404, detail="Could not create Dropbox shared link")
-        
-        # Convert to direct image URL
-        direct_url = shared_link.replace('?dl=1', '?raw=1')
-        
-        # Redirect to the Dropbox image
-        return RedirectResponse(url=direct_url, status_code=302)
-        
+        # Download file content directly from Dropbox
+        try:
+            metadata, response = processing_service.dropbox_service.dbx.files_download(dropbox_path)
+            
+            # Determine content type based on file extension
+            content_type = "image/jpeg"  # Default
+            if dropbox_path.lower().endswith(('.png',)):
+                content_type = "image/png"
+            elif dropbox_path.lower().endswith(('.gif',)):
+                content_type = "image/gif"
+            elif dropbox_path.lower().endswith(('.webp',)):
+                content_type = "image/webp"
+            elif dropbox_path.lower().endswith(('.bmp',)):
+                content_type = "image/bmp"
+            
+            return Response(
+                content=response.content,
+                media_type=content_type,
+                headers={
+                    "Cache-Control": "public, max-age=3600",
+                    "Content-Disposition": f'inline; filename="{metadata.name}"'
+                }
+            )
+            
+        except dropbox.exceptions.ApiError as e:
+            logger.error(f"Dropbox API error for {dropbox_path}: {e}")
+            raise HTTPException(status_code=404, detail="File not found in Dropbox")
+            
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error getting image from Dropbox for file {file_id}: {e}")
+        logger.error(f"Error serving image {file_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/thumbnail/{file_id}")
@@ -394,45 +411,141 @@ async def get_thumbnail_from_dropbox(file_id: str, size: str = "medium"):
         if not processing_service:
             raise HTTPException(status_code=503, detail="Processing service not initialized")
         
-        # Get file info from Weaviate using the file ID
+        # Get file info from Weaviate using file ID
         file_data = processing_service.weaviate_service.get_file_by_id(file_id)
         if not file_data:
             raise HTTPException(status_code=404, detail="File not found in database")
         
-        # Get the Dropbox path
         dropbox_path = file_data.get("dropbox_path")
         file_type = file_data.get("file_type", "")
         
         if not dropbox_path:
-            raise HTTPException(status_code=404, detail="Dropbox path not found")
+            raise HTTPException(status_code=404, detail="File path not found")
         
-        # Generate appropriate link based on file type
-        if file_type == "image":
-            # Get Dropbox thumbnail
-            thumbnail_link = processing_service.dropbox_service.get_thumbnail_link(dropbox_path, size)
-            if thumbnail_link:
-                direct_url = thumbnail_link.replace('?dl=1', '?raw=1')
-                return RedirectResponse(url=direct_url, status_code=302)
+        # For videos, try to get thumbnail or return placeholder
+        if file_type == "video":
+            try:
+                # Try to get video thumbnail from Dropbox
+                metadata, thumbnail_content = processing_service.dropbox_service.dbx.files_get_thumbnail(
+                    dropbox_path,
+                    format=dropbox.files.ThumbnailFormat.jpeg,
+                    size=dropbox.files.ThumbnailSize.w640h480
+                )
+                return Response(
+                    content=thumbnail_content,
+                    media_type="image/jpeg",
+                    headers={"Cache-Control": "public, max-age=3600"}
+                )
+            except:
+                # Video thumbnail not available, return placeholder or full video thumbnail
+                logger.info(f"No thumbnail available for video {dropbox_path}")
+                raise HTTPException(status_code=404, detail="Video thumbnail not available")
+        
+        # For images, get thumbnail from Dropbox
+        try:
+            # Map size parameter to Dropbox thumbnail sizes
+            size_mapping = {
+                "small": dropbox.files.ThumbnailSize.w128h128,
+                "medium": dropbox.files.ThumbnailSize.w640h480,
+                "large": dropbox.files.ThumbnailSize.w1024h768
+            }
             
-            # Fallback to full image
-            shared_link = processing_service.dropbox_service.create_shared_link(dropbox_path)
-            if shared_link:
-                direct_url = shared_link.replace('?dl=1', '?raw=1')
-                return RedirectResponse(url=direct_url, status_code=302)
-        
-        elif file_type == "video":
-            # Get video preview
-            preview_link = processing_service.dropbox_service.get_video_preview_link(dropbox_path)
-            if preview_link:
-                direct_url = preview_link.replace('?dl=1', '?raw=1')
-                return RedirectResponse(url=direct_url, status_code=302)
-        
-        raise HTTPException(status_code=404, detail="Could not generate thumbnail")
-        
+            thumbnail_size = size_mapping.get(size, dropbox.files.ThumbnailSize.w640h480)
+            
+            # Get thumbnail from Dropbox
+            metadata, thumbnail_content = processing_service.dropbox_service.dbx.files_get_thumbnail(
+                dropbox_path,
+                format=dropbox.files.ThumbnailFormat.jpeg,
+                size=thumbnail_size
+            )
+            
+            return Response(
+                content=thumbnail_content,
+                media_type="image/jpeg",
+                headers={
+                    "Cache-Control": "public, max-age=3600",
+                    "Content-Disposition": f'inline; filename="thumb_{metadata.name}.jpg"'
+                }
+            )
+            
+        except dropbox.exceptions.ApiError as e:
+            logger.warning(f"Thumbnail not available for {dropbox_path}, falling back to full image")
+            # Fallback to full image if thumbnail fails
+            return await get_image_from_dropbox(file_id)
+            
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error getting thumbnail from Dropbox for file {file_id}: {e}")
+        logger.error(f"Error serving thumbnail {file_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/file/{file_id}")
+async def get_file_from_dropbox(file_id: str):
+    """Get any file directly from Dropbox using file ID from Weaviate"""
+    try:
+        if not processing_service:
+            raise HTTPException(status_code=503, detail="Processing service not initialized")
+        
+        # Get file info from Weaviate using file ID
+        file_data = processing_service.weaviate_service.get_file_by_id(file_id)
+        if not file_data:
+            raise HTTPException(status_code=404, detail="File not found in database")
+        
+        dropbox_path = file_data.get("dropbox_path")
+        file_type = file_data.get("file_type", "")
+        
+        if not dropbox_path:
+            raise HTTPException(status_code=404, detail="File path not found")
+        
+        # Download file content directly from Dropbox
+        try:
+            metadata, response = processing_service.dropbox_service.dbx.files_download(dropbox_path)
+            
+            # Determine content type based on file type and extension
+            content_type = "application/octet-stream"  # Default
+            
+            if file_type == "image":
+                if dropbox_path.lower().endswith(('.jpg', '.jpeg')):
+                    content_type = "image/jpeg"
+                elif dropbox_path.lower().endswith(('.png',)):
+                    content_type = "image/png"
+                elif dropbox_path.lower().endswith(('.gif',)):
+                    content_type = "image/gif"
+                elif dropbox_path.lower().endswith(('.webp',)):
+                    content_type = "image/webp"
+                elif dropbox_path.lower().endswith(('.bmp',)):
+                    content_type = "image/bmp"
+            elif file_type == "video":
+                if dropbox_path.lower().endswith(('.mp4',)):
+                    content_type = "video/mp4"
+                elif dropbox_path.lower().endswith(('.avi',)):
+                    content_type = "video/x-msvideo"
+                elif dropbox_path.lower().endswith(('.mov',)):
+                    content_type = "video/quicktime"
+                elif dropbox_path.lower().endswith(('.mkv',)):
+                    content_type = "video/x-matroska"
+                elif dropbox_path.lower().endswith(('.wmv',)):
+                    content_type = "video/x-ms-wmv"
+                elif dropbox_path.lower().endswith(('.flv',)):
+                    content_type = "video/x-flv"
+            
+            return Response(
+                content=response.content,
+                media_type=content_type,
+                headers={
+                    "Cache-Control": "public, max-age=3600",
+                    "Content-Disposition": f'inline; filename="{metadata.name}"'
+                }
+            )
+            
+        except dropbox.exceptions.ApiError as e:
+            logger.error(f"Dropbox API error for {dropbox_path}: {e}")
+            raise HTTPException(status_code=404, detail="File not found in Dropbox")
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error serving file {file_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/status")
@@ -819,6 +932,47 @@ async def initial_process_videos(background_tasks: BackgroundTasks):
         "note": "This will process only videos from cache with AI-generated captions and embeddings",
         "estimated_time": f"~{cached_videos // 30} minutes (videos take longer to process)"
     }
+
+@app.get("/api/download/{file_id}")
+async def download_file_from_dropbox(file_id: str):
+    """Download file from Dropbox using file ID from Weaviate"""
+    try:
+        if not processing_service:
+            raise HTTPException(status_code=503, detail="Processing service not initialized")
+        
+        # Get file info from Weaviate using file ID
+        file_data = processing_service.weaviate_service.get_file_by_id(file_id)
+        if not file_data:
+            raise HTTPException(status_code=404, detail="File not found in database")
+        
+        dropbox_path = file_data.get("dropbox_path")
+        file_name = file_data.get("file_name", "download")
+        
+        if not dropbox_path:
+            raise HTTPException(status_code=404, detail="File path not found")
+        
+        # Download file content directly from Dropbox
+        try:
+            metadata, response = processing_service.dropbox_service.dbx.files_download(dropbox_path)
+            
+            return Response(
+                content=response.content,
+                media_type="application/octet-stream",
+                headers={
+                    "Content-Disposition": f'attachment; filename="{file_name}"',
+                    "Content-Length": str(len(response.content))
+                }
+            )
+            
+        except dropbox.exceptions.ApiError as e:
+            logger.error(f"Dropbox API error for download {dropbox_path}: {e}")
+            raise HTTPException(status_code=404, detail="File not found in Dropbox")
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error downloading file {file_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 # Background task functions
 
